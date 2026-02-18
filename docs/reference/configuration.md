@@ -33,6 +33,9 @@ sandbox_policy = "workspace-write"
 
 [providers.claude]
 enabled = false
+model = "sonnet"
+approval_policy = "on-failure"
+sandbox_policy = "workspace-write"
 
 [providers.gemini]
 enabled = false
@@ -56,6 +59,19 @@ enabled = false
 
 ### `[providers.<key>]`
 Provider-specific settings. Core reads only normalized fields and passes provider-specific values through module boundaries.
+
+`[providers.claude]`:
+- `enabled: bool`
+  - Enables/disables Claude provider configuration.
+  - Default: `false`.
+- `model: string`
+  - Optional Claude model alias/name passed to `claude --model`.
+  - Default: empty (CLI default model).
+- `approval_policy: string`
+  - Daedalus policy mapped to Claude `--permission-mode`.
+  - Allowed: `on-failure`, `on-request`, `never`.
+- `sandbox_policy: string`
+  - Currently supported: `workspace-write`.
 
 ## CLI overrides (planned)
 - `--provider <name>`

@@ -5,7 +5,7 @@ Keep core runtime provider-agnostic so Codex, Claude, and Gemini integrate as mo
 
 ## Provider keys
 - `codex` (v1 target)
-- `claude` (planned)
+- `claude` (CLI-backed)
 - `gemini` (planned)
 
 ## Required interface
@@ -84,9 +84,14 @@ Retry guidance:
 - New fields must be additive and optional.
 - Breaking contract changes require major version bump and migration notes.
 
+## Provider notes
+- Claude integration uses the `claude` CLI (`-p/--print` mode) as the execution surface.
+- Core runtime remains provider-agnostic; provider-specific CLI flags are contained in the Claude provider module.
+- Daedalus does not depend on Claude SDK usage for agent execution.
+- Daedalus does not require Claude OAuth integration; Claude authentication is handled by the local CLI environment.
+
 ## Test requirements (all providers)
 - Pass shared contract test suite.
 - Pass event mapping golden tests.
 - Pass one integration run in fixture repository.
 - Support cancellation and graceful shutdown behavior.
-

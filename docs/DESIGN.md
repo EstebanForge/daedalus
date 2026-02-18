@@ -51,10 +51,11 @@ Controls:
 ### Flow B: run loop
 1. User starts run from CLI or TUI.
 2. System resolves story candidate.
-3. Codex SDK iteration executes with scoped prompt/context.
-4. Quality commands run.
-5. On success: commit + mark passed + append progress.
-6. Repeat until complete or operator interruption.
+3. Provider iteration executes with scoped prompt/context through provider adapters.
+4. Claude provider path runs via `claude -p` (CLI-only integration surface).
+5. Quality commands run.
+6. On success: commit + mark passed + append progress.
+7. Repeat until complete or operator interruption.
 
 ### Flow C: pause/resume
 1. Pause request marks graceful halt.

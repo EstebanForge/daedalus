@@ -68,7 +68,7 @@ Loop:
 Responsibilities:
 - Isolate provider SDK/CLI usage.
 - Stream normalized events.
-- Map SDK failures to typed core errors.
+- Map provider-native failures to typed core errors.
 
 Contract:
 - `RunIteration(ctx, request) -> (<-chan Event, IterationResult, error)`
@@ -156,7 +156,9 @@ Loop states:
 
 ## Provider integration notes
 - Codex is v1 implementation target.
-- Claude and Gemini are planned modules behind the same provider contract.
+- Claude integration is CLI-only through the `claude` binary; no Claude SDK dependency in Daedalus core or adapter contracts.
+- Claude OAuth is not a dependency for Daedalus integration; authentication is delegated to the local Claude CLI session/token setup.
+- Gemini remains a planned module behind the same provider contract.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.
 
@@ -172,4 +174,4 @@ Loop states:
 - Phase 2: provider contract + registry + quality gates.
 - Phase 3: Codex provider implementation + TUI runtime controls and views.
 - Phase 4: worktree mode + hardening + docs finalization.
-- Phase 5: Claude/Gemini provider modules.
+- Phase 5: Gemini provider module and multi-provider hardening.

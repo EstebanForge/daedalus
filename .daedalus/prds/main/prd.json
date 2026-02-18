@@ -1,0 +1,17 @@
+{
+  "project": "main",
+  "description": "Describe your project and then update user stories in prd.json.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Define first implementation story",
+      "description": "As an operator, I want to define my first actionable story so that Daedalus can run a concrete iteration.",
+      "acceptanceCriteria": [
+        "Story has clear objective.",
+        "Story has measurable acceptance criteria."
+      ],
+      "priority": 1,
+      "passes": false
+    }
+  ]
+}

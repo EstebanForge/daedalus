@@ -5,7 +5,7 @@
 
 Provider selection:
 - Global flag: `--provider <name>`
-- Supported keys (planned): `codex`, `claude`, `gemini`
+- Supported keys: `codex`, `claude`, `gemini`
 - Default in v1: `codex`
 
 Retry controls:
@@ -28,7 +28,7 @@ Behavior:
 - If multiple PRDs exist and `name` omitted, command fails.
 - Provider is resolved from `--provider` or config default.
 - Retry config resolved from CLI flags or config defaults.
-- Current state: provider adapter stub; Codex implementation pending.
+- Current state: Claude provider runs through the `claude` CLI in print mode; Codex adapter remains pending.
 
 ### `daedalus new [name] [context...]`
 Create a PRD scaffold under `.daedalus/prds/<name>/`.

@@ -67,6 +67,8 @@ Acceptance:
 - Adapter errors are typed and retry-aware.
 - Core loop is provider-agnostic.
 - Default provider is configurable and defaults to `codex`.
+- Claude integration must run through the local Claude CLI surface (no direct Claude SDK dependency).
+- Claude OAuth is not required by Daedalus runtime; auth/session handling is delegated to Claude CLI.
 
 ### FR-004 Quality gates
 System must execute configured checks before completion.
@@ -140,7 +142,7 @@ Acceptance:
 
 ### M2 Loop core
 - Story picker and transition engine.
-- Codex SDK adapter integration.
+- Codex provider adapter integration.
 - Event stream and structured logs.
 
 ### M3 TUI
@@ -154,13 +156,13 @@ Acceptance:
 - Tests and docs completion.
 
 ## Risks
-- SDK API/event changes.
+- Provider API/CLI and policy changes.
 - Repo-specific check pipelines can be slow/flaky.
 - Ambiguous PRDs can cause poor story decomposition.
 - Multi-provider behavior drift (different tool/event semantics).
 
 ## Mitigations
-- Strict adapter boundary around SDK.
+- Strict adapter boundary around provider integrations (SDK/CLI).
 - Configurable retries/timeouts/circuit-breakers.
 - PRD validation rules + clear authoring guidance.
 - Shared provider contract tests and normalized event golden tests.
