@@ -4,7 +4,7 @@
 Three-layer local-first architecture:
 - Interface layer: CLI + TUI + plugin entry.
 - Core layer: PRD service, loop manager, quality and git services.
-- Adapter layer: provider modules (Codex first, Claude/Gemini ready).
+- Adapter layer: provider modules (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi CLI).
 
 ## Directory layout
 Global config (Linux/XDG):
@@ -104,7 +104,7 @@ Provider-specific event detail must be optional metadata only. Core logic cannot
 
 ### Provider registry
 Responsibilities:
-- Resolve provider by key (`codex`, `claude`, `gemini`).
+- Resolve provider by key (`codex`, `claude`, `gemini`, `opencode`, `copilot`, `qwen`, `pi`).
 - Return configured provider instance or explicit configuration errors.
 - Keep provider selection out of loop/business logic.
 
@@ -155,10 +155,15 @@ Loop states:
 - Shared structured logger; per-PRD artifact files.
 
 ## Provider integration notes
+- All seven providers use CLI-based execution with the `-p` / `--print` flag pattern for non-interactive mode.
 - Codex is v1 implementation target.
 - Claude integration is CLI-only through the `claude` binary; no Claude SDK dependency in Daedalus core or adapter contracts.
 - Claude OAuth is not a dependency for Daedalus integration; authentication is delegated to the local Claude CLI session/token setup.
-- Gemini remains a planned module behind the same provider contract.
+- Gemini CLI uses `-p/--prompt` for non-interactive mode. **Requires API key** (not OAuth) to comply with Google ToS.
+- OpenCode CLI uses `-p` or direct prompt for non-interactive mode.
+- Copilot CLI uses `-p/--prompt` for non-interactive mode.
+- Qwen Code uses `-p` for headless mode. Supports Qwen OAuth (free tier) or API keys. **API key required for CI/automation.**
+- Pi CLI uses `-p` for non-interactive mode. Supports multiple providers via `--provider` flag.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.
 
@@ -172,6 +177,6 @@ Loop states:
 ## Implementation phases
 - Phase 1: CLI + PRD service + logs.
 - Phase 2: provider contract + registry + quality gates.
-- Phase 3: Codex provider implementation + TUI runtime controls and views.
+- Phase 3: All seven provider implementations (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi) + TUI runtime controls and views.
 - Phase 4: worktree mode + hardening + docs finalization.
-- Phase 5: Gemini provider module and multi-provider hardening.
+- Phase 5: Multi-provider hardening + provider-specific optimizations.

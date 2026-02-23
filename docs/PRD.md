@@ -10,7 +10,7 @@ Codex-native autonomous delivery loop with a TUI, PRD-driven execution, and stri
 Large implementation sessions degrade as context grows. Teams lose determinism, quality drifts, and commit history becomes noisy. We need a repeatable story-at-a-time loop with explicit operator control.
 
 ## Goal
-Build a Codex plugin-capable orchestrator that:
+Build an autonomous delivery orchestrator supporting Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, and Pi CLI — all through their non-interactive CLI modes.
 - Executes one user story per fresh iteration.
 - Persists memory and progress between iterations.
 - Enforces checks before story completion.
@@ -67,8 +67,15 @@ Acceptance:
 - Adapter errors are typed and retry-aware.
 - Core loop is provider-agnostic.
 - Default provider is configurable and defaults to `codex`.
-- Claude integration must run through the local Claude CLI surface (no direct Claude SDK dependency).
-- Claude OAuth is not required by Daedalus runtime; auth/session handling is delegated to Claude CLI.
+- All seven providers (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi) integrate via CLI adapters:
+  - **Claude:** Uses `claude -p` (CLI mode)
+  - **Gemini:** Uses `gemini -p` (requires API key, not OAuth)
+  - **Codex:** Uses `codex "prompt"` or `codex exec`
+  - **OpenCode:** Uses `opencode -p` or `opencode "prompt"`
+  - **Copilot:** Uses `copilot -p` or `copilot --prompt`
+  - **Qwen Code:** Uses `qwen -p` (supports OAuth or API key)
+  - **Pi:** Uses `pi -p` (supports multiple providers)
+- Claude OAuth is not required by Daedalus runtime; auth/session handling is delegated to each CLI.
 
 ### FR-004 Quality gates
 System must execute configured checks before completion.
@@ -160,6 +167,8 @@ Acceptance:
 - Repo-specific check pipelines can be slow/flaky.
 - Ambiguous PRDs can cause poor story decomposition.
 - Multi-provider behavior drift (different tool/event semantics).
+- **Provider ToS compliance:** Google Gemini prohibits OAuth usage in third-party tools (bans reported). Always require API keys for Gemini.
+- **Anthropic Claude:** OAuth tokens from Free/Pro/Max plans not permitted for Agent SDK (though CLI mode is allowed).
 
 ## Mitigations
 - Strict adapter boundary around provider integrations (SDK/CLI).

@@ -36,8 +36,12 @@ This file is the operating guide for agents working in the Daedalus repository.
 ## Provider Model
 - Provider keys:
 - `codex` (default)
-- `claude` (planned)
-- `gemini` (planned)
+- `claude`
+- `gemini`
+- `opencode`
+- `copilot`
+- `qwen`
+- `pi`
 - Registry resolves provider by key and returns explicit configuration errors.
 
 ## Runtime Defaults

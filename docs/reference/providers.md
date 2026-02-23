@@ -1,12 +1,18 @@
 # Daedalus Provider Contract v1
 
 ## Goal
-Keep core runtime provider-agnostic so Codex, Claude, and Gemini integrate as modules without refactoring loop/business logic.
+Keep core runtime provider-agnostic so Codex, Claude, Gemini, OpenCode, and Copilot CLI integrate as modules without refactoring loop/business logic.
 
 ## Provider keys
 - `codex` (v1 target)
 - `claude` (CLI-backed)
-- `gemini` (planned)
+- `gemini` (CLI-backed)
+- `opencode` (CLI-backed)
+- `copilot` (CLI-backed)
+- `qwen` (CLI-backed)
+- `pi` (CLI-backed)
+
+All providers use the same non-interactive CLI pattern (`-p` / `--print`) for execution.
 
 ## Required interface
 - `Name() string`
@@ -85,10 +91,48 @@ Retry guidance:
 - Breaking contract changes require major version bump and migration notes.
 
 ## Provider notes
-- Claude integration uses the `claude` CLI (`-p/--print` mode) as the execution surface.
-- Core runtime remains provider-agnostic; provider-specific CLI flags are contained in the Claude provider module.
+
+### Claude
+- Integration uses the `claude` CLI (`-p/--print` mode) as the execution surface.
 - Daedalus does not depend on Claude SDK usage for agent execution.
 - Daedalus does not require Claude OAuth integration; Claude authentication is handled by the local CLI environment.
+- **ToS Note:** OAuth tokens from Free/Pro/Max plans are NOT permitted for Agent SDK use. However, using `claude -p` (CLI mode) is allowed as it uses OAuth for Claude Code itself.
+
+### Gemini
+- Integration uses the `gemini` CLI (`-p/--print` mode) as the execution surface.
+- Requires API key authentication (OAuth via Antigravity is NOT supported).
+- **ToS Warning:** Using OAuth tokens from Google AI Ultra/Pro with third-party tools violates Google's ToS and may result in account bans. Always use API keys from Google Cloud Console.
+
+### Codex
+- Integration uses `codex "prompt"` or `codex exec` for non-interactive execution.
+- Uses OpenAI API under the hood (subscription-based).
+- No additional authentication notes.
+
+### OpenCode
+- Integration uses `opencode -p "prompt"` or `opencode "prompt"` for non-interactive execution.
+- Supports custom model configuration via `--model` flag.
+- Uses API key authentication.
+
+### Copilot
+- Integration uses `copilot -p "prompt"` or `copilot --prompt "prompt"` for non-interactive execution.
+- Requires GitHub authentication (via `gh auth login`).
+- No additional authentication notes.
+
+### Qwen Code
+- Integration uses `qwen -p "prompt"` for non-interactive execution.
+- Forked from Gemini CLI, optimized for Qwen3-Coder models.
+- Supports multiple authentication methods:
+  - **Qwen OAuth** (free tier, 1,000 requests/day)
+  - **API keys** (required for headless/CI environments)
+- Supports multiple providers: OpenAI, Anthropic, Google Gemini, Alibaba Cloud.
+- **Note:** OAuth flow requires browser — use API key for CI/automation.
+
+### Pi
+- Integration uses `pi -p "prompt"` for non-interactive execution.
+- Supports multiple providers via `--provider` flag (e.g., `openai`, `anthropic`).
+- Also supports model prefixes: `pi --model openai/gpt-4o "prompt"`.
+- Has RPC mode for stdin/stdout integration.
+- Requires authentication based on selected provider.
 
 ## Test requirements (all providers)
 - Pass shared contract test suite.
