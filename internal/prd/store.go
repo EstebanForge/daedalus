@@ -55,6 +55,12 @@ func (s Store) Create(name string) error {
 	if err := os.WriteFile(progressFile, []byte("## Codebase Patterns\n"), 0o644); err != nil {
 		return fmt.Errorf("failed to write progress.md: %w", err)
 	}
+	if err := os.WriteFile(project.PRDAgentLogPath(s.baseDir, name), []byte{}, 0o644); err != nil {
+		return fmt.Errorf("failed to write agent.log: %w", err)
+	}
+	if err := os.WriteFile(project.PRDEventsPath(s.baseDir, name), []byte{}, 0o644); err != nil {
+		return fmt.Errorf("failed to write events.jsonl: %w", err)
+	}
 
 	return nil
 }

@@ -22,9 +22,18 @@ TOML only.
 [provider]
 default = "codex"
 
+[worktree]
+enabled = false
+
 [retry]
 max_retries = 3
 delays = ["0s", "5s", "15s"]
+
+[quality]
+commands = ["go test ./..."]
+
+[ui]
+theme = "auto"
 
 [providers.codex]
 model = "default"
@@ -69,6 +78,12 @@ provider = "anthropic"
   - Default provider key.
   - v1 default: `"codex"`.
 
+### `[worktree]`
+- `enabled: bool`
+  - Enables worktree mode for `run`/TUI loop execution.
+  - v1 default: `false`.
+  - When enabled, runs execute in `.daedalus/worktrees/<prd-name>/` and artifacts still persist under `.daedalus/prds/<prd-name>/`.
+
 ### `[retry]`
 - `max_retries: int`
   - Retry attempts after initial failure.
@@ -78,9 +93,23 @@ provider = "anthropic"
   - v1 default: `["0s", "5s", "15s"]`.
   - If retries exceed delay entries, use the last delay repeatedly.
 
+### `[quality]`
+- `commands: []string`
+  - Ordered quality gate commands executed after provider iteration and before story completion.
+  - Any non-zero exit code fails the run iteration.
+  - v1 default: `["go test ./..."]`.
+
+### `[ui]`
+- `theme: string`
+  - Controls TUI color palette selection.
+  - Valid values: `auto`, `dark`, `light`.
+  - v1 default: `"auto"`.
+  - `auto` attempts OS theme detection (macOS/Windows/Linux desktop hints). If detection is unavailable, Daedalus falls back to `dark`.
+
 ### `[providers.<key>]`
 Provider-specific settings. Core reads only normalized fields and passes provider-specific values through module boundaries.
 
+<<<<<<< Updated upstream
 `[providers.codex]`:
 - `model: string`
   - Optional model name. Default: `"default"`.
@@ -91,18 +120,25 @@ Provider-specific settings. Core reads only normalized fields and passes provide
   - Sandbox policy for model-generated commands.
 
 `[providers.claude]`:
+||||||| Stash base
+`[providers.claude]`:
+=======
+Common normalized fields:
+>>>>>>> Stashed changes
 - `enabled: bool`
+<<<<<<< Updated upstream
   - Enables/disables Claude provider configuration.
   - Default: `true`.
+||||||| Stash base
+  - Enables/disables Claude provider configuration.
+  - Default: `false`.
+=======
+>>>>>>> Stashed changes
 - `model: string`
-  - Optional Claude model alias/name passed to `claude --model`.
-  - Default: empty (CLI default model).
 - `approval_policy: string`
-  - Daedalus policy mapped to Claude `--permission-mode`.
-  - Allowed: `on-failure`, `on-request`, `never`.
 - `sandbox_policy: string`
-  - Currently supported: `workspace-write`.
 
+<<<<<<< Updated upstream
 `[providers.gemini]`:
 - `enabled: bool`
   - Enables/disables Gemini provider configuration.
@@ -161,18 +197,55 @@ Provider-specific settings. Core reads only normalized fields and passes provide
   - Default: `openai`.
 
 ## CLI overrides (planned)
+||||||| Stash base
+## CLI overrides (planned)
+=======
+`approval_policy` valid values (v1):
+- `on-failure`
+- `on-request`
+- `never`
+
+`sandbox_policy` valid values (v1):
+- `workspace-write`
+
+Provider support in v1:
+- `codex`: implemented through local Codex CLI (`codex exec`).
+- `claude`: implemented through local Claude CLI (`claude -p`).
+- `gemini`: planned; implementation pending.
+
+Invalid value behavior:
+- Unknown `approval_policy` or unsupported `sandbox_policy` fails fast as provider `configuration_error` when the provider run starts.
+
+## CLI overrides
+Implemented global flags:
+- `--config <path>`
+>>>>>>> Stashed changes
 - `--provider <name>`
+- `--worktree` or `--worktree=<bool>`
 - `--max-retries <n>`
 - `--retry-delays <csv-duration>`
 
-## Environment overrides (planned)
+Run command also supports:
+- `daedalus run [name] --worktree`
+- `daedalus run [name] --worktree=<bool>`
+
+Boolean values accepted for `--worktree` and `DAEDALUS_WORKTREE`:
+- true: `1`, `true`, `yes`, `on`
+- false: `0`, `false`, `no`, `off`
+
+## Environment overrides
+Implemented:
+- `DAEDALUS_CONFIG`
 - `DAEDALUS_PROVIDER`
+- `DAEDALUS_WORKTREE`
 - `DAEDALUS_MAX_RETRIES`
 - `DAEDALUS_RETRY_DELAYS`
-- `DAEDALUS_CONFIG` (explicit config file path)
+- `DAEDALUS_THEME` (`dark` or `light`; overrides `ui.theme`)
 
 ## Validation rules
-- `provider.default` must be a known provider key.
+- `provider.default` must not be empty.
 - `retry.max_retries` must be `>= 0`.
 - `retry.delays` values must parse as valid durations.
 - Empty `retry.delays` with `max_retries > 0` is invalid.
+- `quality.commands` must contain at least one non-empty command.
+- `ui.theme` must be one of `auto`, `dark`, or `light`.

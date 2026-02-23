@@ -1,28 +1,349 @@
 package app
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EstebanForge/daedalus/internal/config"
+	daedalusgit "github.com/EstebanForge/daedalus/internal/git"
 	"github.com/EstebanForge/daedalus/internal/loop"
 	"github.com/EstebanForge/daedalus/internal/prd"
+	"github.com/EstebanForge/daedalus/internal/project"
 	"github.com/EstebanForge/daedalus/internal/providers"
+	"github.com/EstebanForge/daedalus/internal/quality"
+	daedalusworktree "github.com/EstebanForge/daedalus/internal/worktree"
 )
 
 type App struct {
 	version string
+	in      io.Reader
+	out     io.Writer
+	runEdit func(ctx context.Context, command string, args []string) error
+}
+
+type tuiState struct {
+	mu             sync.Mutex
+	selectedPRD    string
+	view           string
+	previousView   string
+	loopState      string
+	themeMode      string
+	lastError      string
+	lastActivity   string
+	iterations     int
+	startedAt      time.Time
+	lastRunAt      string
+	provider       string
+	pauseRequested bool
+	stopRequested  bool
+	storyIndex     int
+	pickerIndex    int
+	logFilter      string
+	logTail        int
+	logOffset      int
+	diffOffset     int
+}
+
+type tuiSnapshot struct {
+	selectedPRD    string
+	view           string
+	previousView   string
+	loopState      string
+	themeMode      string
+	lastError      string
+	lastActivity   string
+	iterations     int
+	startedAt      time.Time
+	lastRunAt      string
+	provider       string
+	pauseRequested bool
+	stopRequested  bool
+	storyIndex     int
+	pickerIndex    int
+	logFilter      string
+	logTail        int
+	logOffset      int
+	diffOffset     int
+}
+
+func (s *tuiState) snapshot() tuiSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return tuiSnapshot{
+		selectedPRD:    s.selectedPRD,
+		view:           s.view,
+		previousView:   s.previousView,
+		loopState:      s.loopState,
+		themeMode:      s.themeMode,
+		lastError:      s.lastError,
+		lastActivity:   s.lastActivity,
+		iterations:     s.iterations,
+		startedAt:      s.startedAt,
+		lastRunAt:      s.lastRunAt,
+		provider:       s.provider,
+		pauseRequested: s.pauseRequested,
+		stopRequested:  s.stopRequested,
+		storyIndex:     s.storyIndex,
+		pickerIndex:    s.pickerIndex,
+		logFilter:      s.logFilter,
+		logTail:        s.logTail,
+		logOffset:      s.logOffset,
+		diffOffset:     s.diffOffset,
+	}
+}
+
+func (s *tuiState) setView(view string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.view = view
+}
+
+func (s *tuiState) setViewWithHistory(next string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := strings.TrimSpace(strings.ToLower(s.view))
+	target := strings.TrimSpace(strings.ToLower(next))
+	if target == "" {
+		target = "dashboard"
+	}
+	if current == "" {
+		current = "dashboard"
+	}
+	if current != target {
+		s.previousView = current
+	}
+	s.view = target
+}
+
+func (s *tuiState) closeOverlayView() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	restore := strings.TrimSpace(strings.ToLower(s.previousView))
+	if restore == "" {
+		restore = "dashboard"
+	}
+	s.view = restore
+}
+
+func (s *tuiState) setSelectedPRD(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selectedPRD = name
+	s.storyIndex = 0
+	s.pickerIndex = 0
+	s.logOffset = 0
+	s.diffOffset = 0
+}
+
+func (s *tuiState) setLoopState(loopState string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loopState = loopState
+}
+
+func (s *tuiState) setThemeMode(themeMode string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	normalized := strings.TrimSpace(strings.ToLower(themeMode))
+	switch normalized {
+	case "dark", "light":
+		s.themeMode = normalized
+	default:
+		s.themeMode = "dark"
+	}
+}
+
+func (s *tuiState) setActivity(activity string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastActivity = strings.TrimSpace(activity)
+}
+
+func (s *tuiState) setError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err == nil {
+		s.lastError = ""
+		return
+	}
+	s.lastError = err.Error()
+}
+
+func (s *tuiState) markIterationSuccess(provider string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.iterations++
+	s.lastRunAt = time.Now().UTC().Format(time.RFC3339)
+	if strings.TrimSpace(provider) != "" {
+		s.provider = provider
+	}
+}
+
+func (s *tuiState) setProvider(provider string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(provider) != "" {
+		s.provider = provider
+	}
+}
+
+func (s *tuiState) setPauseRequested(value bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pauseRequested = value
+}
+
+func (s *tuiState) setStopRequested(value bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopRequested = value
+}
+
+func (s *tuiState) setLogFilter(filter string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	normalized := strings.TrimSpace(strings.ToLower(filter))
+	if normalized == "" {
+		normalized = "all"
+	}
+	s.logFilter = normalized
+	s.logOffset = 0
+}
+
+func (s *tuiState) setLogTail(tail int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tail < 1 {
+		tail = 1
+	}
+	s.logTail = tail
+}
+
+func (s *tuiState) moveStoryIndex(delta int, total int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if total < 1 {
+		s.storyIndex = 0
+		return
+	}
+	next := s.storyIndex + delta
+	if next < 0 {
+		next = 0
+	}
+	if next > total-1 {
+		next = total - 1
+	}
+	s.storyIndex = next
+}
+
+func (s *tuiState) movePickerIndex(delta int, total int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if total < 1 {
+		s.pickerIndex = 0
+		return
+	}
+	next := s.pickerIndex + delta
+	if next < 0 {
+		next = 0
+	}
+	if next > total-1 {
+		next = total - 1
+	}
+	s.pickerIndex = next
+}
+
+func (s *tuiState) moveLogOffset(delta int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.logOffset + delta
+	if next < 0 {
+		next = 0
+	}
+	s.logOffset = next
+}
+
+func (s *tuiState) moveDiffOffset(delta int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.diffOffset + delta
+	if next < 0 {
+		next = 0
+	}
+	s.diffOffset = next
+}
+
+type loopController struct {
+	mu           sync.Mutex
+	running      bool
+	pauseRequest bool
+	stopRequest  bool
+	cancel       context.CancelFunc
+}
+
+func (c *loopController) start(cancel context.CancelFunc) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.running {
+		return false
+	}
+	c.running = true
+	c.pauseRequest = false
+	c.stopRequest = false
+	c.cancel = cancel
+	return true
+}
+
+func (c *loopController) stopRunning() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.running = false
+	c.cancel = nil
+}
+
+func (c *loopController) requestPause() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pauseRequest = true
+}
+
+func (c *loopController) requestStop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stopRequest = true
+}
+
+func (c *loopController) requestStopNow() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stopRequest = true
+	if c.cancel != nil {
+		c.cancel()
+	}
+}
+
+func (c *loopController) checkRequests() (pause bool, stop bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pauseRequest, c.stopRequest
 }
 
 type globalOptions struct {
 	ConfigPath     string
 	Provider       string
 	ProviderSet    bool
+	Worktree       bool
+	WorktreeSet    bool
 	MaxRetries     int
 	MaxRetriesSet  bool
 	RetryDelays    []string
@@ -34,6 +355,8 @@ type runOptions struct {
 
 	Provider       string
 	ProviderSet    bool
+	Worktree       bool
+	WorktreeSet    bool
 	MaxRetries     int
 	MaxRetriesSet  bool
 	RetryDelays    []string
@@ -41,7 +364,12 @@ type runOptions struct {
 }
 
 func New(version string) App {
-	return App{version: version}
+	return App{
+		version: version,
+		in:      os.Stdin,
+		out:     os.Stdout,
+		runEdit: runEditorCommand,
+	}
 }
 
 func (a App) Run(ctx context.Context, args []string) error {
@@ -73,7 +401,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 
 	switch command {
 	case "", "tui":
-		return errors.New("TUI is not implemented yet; use 'daedalus run <name>'")
+		return a.runTUI(ctx, store, cfg, global, baseDir)
 	case "new":
 		return a.runNew(store, remainingArgs[1:])
 	case "list":
@@ -83,14 +411,16 @@ func (a App) Run(ctx context.Context, args []string) error {
 	case "validate":
 		return a.runValidate(store, remainingArgs[1:])
 	case "run":
-		return a.runLoop(ctx, store, cfg, global, remainingArgs[1:])
+		return a.runLoop(ctx, store, cfg, global, baseDir, remainingArgs[1:])
+	case "plugin":
+		return a.runPlugin(ctx, store, cfg, global, baseDir, remainingArgs[1:])
 	case "edit":
-		return errors.New("'edit' is reserved and not implemented yet")
+		return a.runEditCommand(ctx, store, baseDir, remainingArgs[1:])
 	case "help", "-h", "--help":
 		a.printHelp()
 		return nil
 	case "version", "-v", "--version":
-		fmt.Printf("daedalus version %s\n", a.version)
+		a.writef("daedalus version %s\n", a.version)
 		return nil
 	default:
 		return fmt.Errorf("unknown command: %s", command)
@@ -106,7 +436,7 @@ func (a App) runNew(store prd.Store, args []string) error {
 	if err := store.Create(name); err != nil {
 		return err
 	}
-	fmt.Printf("Created PRD %q under .daedalus/prds/%s/\n", name, name)
+	a.writef("Created PRD %q under .daedalus/prds/%s/\n", name, name)
 	return nil
 }
 
@@ -116,12 +446,12 @@ func (a App) runList(store prd.Store) error {
 		return err
 	}
 	if len(summaries) == 0 {
-		fmt.Println("No PRDs found.")
+		a.writeLine("No PRDs found.")
 		return nil
 	}
 
 	for _, summary := range summaries {
-		fmt.Printf("%s  %d/%d complete  in-progress:%d\n", summary.Name, summary.Complete, summary.Total, summary.InProgress)
+		a.writef("%s  %d/%d complete  in-progress:%d\n", summary.Name, summary.Complete, summary.Total, summary.InProgress)
 	}
 	return nil
 }
@@ -141,19 +471,19 @@ func (a App) runStatus(store prd.Store, args []string) error {
 		return err
 	}
 
-	fmt.Printf("PRD: %s\n", name)
-	fmt.Printf("Project: %s\n", doc.Project)
-	fmt.Printf("Stories: %d total\n", len(doc.UserStories))
-	fmt.Printf("  complete: %d\n", doc.CountComplete())
-	fmt.Printf("  in-progress: %d\n", doc.CountInProgress())
-	fmt.Printf("  pending: %d\n", len(doc.UserStories)-doc.CountComplete()-doc.CountInProgress())
+	a.writef("PRD: %s\n", name)
+	a.writef("Project: %s\n", doc.Project)
+	a.writef("Stories: %d total\n", len(doc.UserStories))
+	a.writef("  complete: %d\n", doc.CountComplete())
+	a.writef("  in-progress: %d\n", doc.CountInProgress())
+	a.writef("  pending: %d\n", len(doc.UserStories)-doc.CountComplete()-doc.CountInProgress())
 
 	next := doc.NextStory()
 	if next == nil {
-		fmt.Println("Next: none (all complete)")
+		a.writeLine("Next: none (all complete)")
 		return nil
 	}
-	fmt.Printf("Next: %s - %s\n", next.ID, next.Title)
+	a.writef("Next: %s - %s\n", next.ID, next.Title)
 	return nil
 }
 
@@ -174,24 +504,24 @@ func (a App) runValidate(store prd.Store, args []string) error {
 
 	result := prd.Validate(doc)
 	if result.Valid() {
-		fmt.Printf("PRD %q is valid.\n", name)
+		a.writef("PRD %q is valid.\n", name)
 		return nil
 	}
 
-	fmt.Printf("PRD %q is invalid:\n", name)
+	a.writef("PRD %q is invalid:\n", name)
 	for _, validationErr := range result.Errors {
-		fmt.Printf("- %s\n", validationErr)
+		a.writef("- %s\n", validationErr)
 	}
 	return fmt.Errorf("validation failed")
 }
 
-func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, args []string) error {
+func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string, args []string) error {
 	run, err := parseRunOptions(args)
 	if err != nil {
 		return err
 	}
 
-	providerName, maxRetries, retryDelays, err := resolveRuntimeSettings(cfg, global, run)
+	providerName, maxRetries, retryDelays, useWorktree, err := resolveRuntimeSettings(cfg, global, run)
 	if err != nil {
 		return err
 	}
@@ -208,33 +538,586 @@ func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, gl
 		return err
 	}
 
+	execDir := baseDir
+	if useWorktree {
+		setupResult, setupErr := daedalusworktree.NewManager().Ensure(ctx, baseDir, name)
+		if setupErr != nil {
+			return setupErr
+		}
+		execDir = setupResult.Path
+		a.writef("Using worktree %q on branch %q.\n", setupResult.Path, setupResult.Branch)
+	}
+
 	manager := loop.NewManager(store, provider, loop.RetryPolicy{
 		MaxRetries: maxRetries,
 		Delays:     retryDelays,
-	})
-	if err := manager.RunOnce(ctx, name, "."); err != nil {
+	}, quality.NewRunner(), cfg.Quality.Commands, daedalusgit.NewCommitter())
+	if err := manager.RunOnce(ctx, name, baseDir, execDir); err != nil {
 		return err
 	}
 
-	fmt.Printf("Run completed with provider %q.\n", provider.Name())
+	a.writef("Run completed with provider %q.\n", provider.Name())
 	return nil
 }
 
 func (a App) printHelp() {
-	fmt.Println("Daedalus - Codex-native autonomous delivery loop")
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Println("  daedalus [--config <path>] [--provider <name>] [--max-retries <n>] [--retry-delays <csv>] [command]")
-	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  new [name]          Create a PRD scaffold")
-	fmt.Println("  list                List PRDs")
-	fmt.Println("  status [name]       Show PRD status")
-	fmt.Println("  validate [name]     Validate PRD JSON")
-	fmt.Println("  run [name]          Run one iteration")
-	fmt.Println("  edit [name]         Reserved")
-	fmt.Println("  help                Show help")
-	fmt.Println("  version             Show version")
+	a.writeLine("Daedalus - Codex-native autonomous delivery loop")
+	a.writeLine("")
+	a.writeLine("Usage:")
+	a.writeLine("  daedalus [--config <path>] [--provider <name>] [--worktree[=<bool>]] [--max-retries <n>] [--retry-delays <csv>] [command]")
+	a.writeLine("")
+	a.writeLine("Commands:")
+	a.writeLine("  new [name]          Create a PRD scaffold")
+	a.writeLine("  list                List PRDs")
+	a.writeLine("  status [name]       Show PRD status")
+	a.writeLine("  validate [name]     Validate PRD JSON")
+	a.writeLine("  run [name]          Run one iteration (supports --worktree)")
+	a.writeLine("  plugin run [name]   Plugin adapter: run one iteration and emit JSON result")
+	a.writeLine("  edit [name]         Open prd.md in editor")
+	a.writeLine("  help                Show help")
+	a.writeLine("  version             Show version")
+}
+
+func (a App) runPlugin(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("plugin command requires a subcommand")
+	}
+
+	switch args[0] {
+	case "run":
+		originalOut := a.out
+		a.out = io.Discard
+		runErr := a.runLoop(ctx, store, cfg, global, baseDir, args[1:])
+		a.out = originalOut
+		if runErr != nil {
+			a.writeJSON(map[string]interface{}{
+				"ok":    false,
+				"error": runErr.Error(),
+			})
+			return runErr
+		}
+		a.writeJSON(map[string]interface{}{
+			"ok":      true,
+			"action":  "run",
+			"message": "iteration completed",
+		})
+		return nil
+	default:
+		return fmt.Errorf("unknown plugin subcommand: %s", args[0])
+	}
+}
+
+func (a App) runEditCommand(ctx context.Context, store prd.Store, baseDir string, args []string) error {
+	name := ""
+	if len(args) > 0 {
+		name = args[0]
+	}
+
+	name, err := store.ResolveName(name)
+	if err != nil {
+		return err
+	}
+
+	path := project.PRDMarkdownPath(baseDir, name)
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("failed to open %s: %w", path, err)
+	}
+
+	command, editorArgs := resolveEditorCommand()
+	editorArgs = append(editorArgs, path)
+
+	runner := a.runEdit
+	if runner == nil {
+		runner = runEditorCommand
+	}
+	if err := runner(ctx, command, editorArgs); err != nil {
+		return fmt.Errorf("editor command failed: %w", err)
+	}
+	return nil
+}
+
+func resolveEditorCommand() (string, []string) {
+	raw := strings.TrimSpace(os.Getenv("DAEDALUS_EDITOR"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("EDITOR"))
+	}
+	if raw == "" {
+		return "vi", nil
+	}
+
+	parts := strings.Fields(raw)
+	if len(parts) == 0 {
+		return "vi", nil
+	}
+	return parts[0], parts[1:]
+}
+
+func runEditorCommand(ctx context.Context, command string, args []string) error {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func (a App) runTUI(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string) error {
+	state := &tuiState{
+		selectedPRD:  "",
+		view:         "dashboard",
+		previousView: "dashboard",
+		loopState:    "ready",
+		lastActivity: "Ready. Press s to start the loop.",
+		startedAt:    time.Now().UTC(),
+		logFilter:    "all",
+		logTail:      16,
+	}
+	controller := &loopController{}
+	if name, err := store.AutoDetectName(); err == nil {
+		state.selectedPRD = name
+	} else if summaries, listErr := store.List(); listErr == nil && len(summaries) > 0 {
+		state.selectedPRD = summaries[0].Name
+	}
+	if providerName, _, _, _, err := resolveRuntimeSettings(cfg, global, runOptions{}); err == nil {
+		state.provider = providerName
+	}
+	state.setThemeMode(resolveTUIColorMode(cfg))
+
+	if shouldUseInteractiveTUI(a.in, a.out) {
+		if interactiveErr := a.runInteractiveTUI(ctx, store, cfg, global, baseDir, state, controller); interactiveErr == nil {
+			return nil
+		} else {
+			a.writef("Interactive TUI error: %v\n", interactiveErr)
+			a.writeLine("Falling back to command mode.")
+		}
+	}
+
+	a.writeLine("Daedalus TUI")
+	a.writeLine("Keys: s(start/run) p(pause) x(stop) t(log) d(diff) n(new) l(PRDs) e(edit) 1-9(switch) j/k(nav) [ ](provider) ,(settings) ?(help) q(quit)")
+	return a.runTUICommandLoop(ctx, store, cfg, global, baseDir, state, controller)
+}
+
+func (a App) runTUICommandLoop(
+	ctx context.Context,
+	store prd.Store,
+	cfg config.Config,
+	global globalOptions,
+	baseDir string,
+	state *tuiState,
+	controller *loopController,
+) error {
+	scanner := bufio.NewScanner(a.in)
+	for {
+		snap := state.snapshot()
+		a.renderTUIView(store, cfg, baseDir, snap)
+		a.writef("daedalus[%s]> ", snap.view)
+
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return err
+			}
+			a.writeLine("")
+			return nil
+		}
+
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		cmd := strings.ToLower(parts[0])
+		args := parts[1:]
+
+		if tabIndex, ok := parseTUITabShortcut(cmd); ok {
+			summaries, err := store.List()
+			if err != nil {
+				state.setActivity("Unable to load PRD tabs.")
+				a.writef("Error: %v\n", err)
+				continue
+			}
+			if tabIndex > len(summaries) {
+				state.setActivity(fmt.Sprintf("Tab %d is not available.", tabIndex))
+				a.writef("Tab %d is not available.\n", tabIndex)
+				continue
+			}
+			target := summaries[tabIndex-1].Name
+			state.setSelectedPRD(target)
+			state.setActivity(fmt.Sprintf("Switched to PRD %s.", target))
+			a.writef("Selected PRD: %s\n", target)
+			continue
+		}
+
+		switch cmd {
+		case "?", "help":
+			a.writeLine("Views: d/dashboard, u/stories, l/logs, diff, picker, h/help, ,/settings")
+			a.writeLine("Actions: s/run, p/pause, x/stop, xx/stop-now, v/validate, n/use <name>, 1-9 switch PRD tab, provider <name>, providers, list, status, f/filter <event|all>, tail <n>, q/quit")
+		case "d", "dashboard":
+			state.setView("dashboard")
+			state.setActivity("Dashboard view.")
+		case "u", "stories":
+			state.setView("stories")
+			state.setActivity("Stories view.")
+		case "l", "logs":
+			state.setView("logs")
+			state.setActivity("Logs view.")
+		case "diff":
+			state.setView("diff")
+			state.setActivity("Diff view.")
+		case "picker":
+			state.setView("picker")
+			state.setActivity("PRD picker view.")
+		case "h":
+			state.setView("help")
+			state.setActivity("Help view.")
+		case ",", "settings":
+			state.setView("settings")
+			state.setActivity("Settings view.")
+		case "t", "toggle":
+			if snap.view == "dashboard" {
+				state.setView("logs")
+				state.setActivity("Logs view.")
+			} else {
+				state.setView("dashboard")
+				state.setActivity("Dashboard view.")
+			}
+		case "n", "use":
+			if len(args) != 1 {
+				a.writeLine("Usage: n <name> | use <name>")
+				continue
+			}
+			state.setSelectedPRD(args[0])
+			state.setActivity(fmt.Sprintf("Selected PRD %s.", args[0]))
+			a.writef("Selected PRD: %s\n", args[0])
+		case "provider", "agent":
+			if len(args) != 1 {
+				a.writeLine("Usage: provider <name>")
+				continue
+			}
+			nextProvider := strings.ToLower(strings.TrimSpace(args[0]))
+			if nextProvider == "" {
+				a.writeLine("provider expects a non-empty name")
+				continue
+			}
+			state.setProvider(nextProvider)
+			state.setActivity(fmt.Sprintf("Active provider set to %s.", nextProvider))
+			a.writef("Active provider: %s\n", nextProvider)
+		case "providers", "agents":
+			state.setActivity("Provider adapters list.")
+			for _, line := range tuiProviderStatusLines(cfg, snap.provider) {
+				a.writeLine(line)
+			}
+		case "list":
+			state.setActivity("Listing PRDs.")
+			if err := a.runList(store); err != nil {
+				state.setActivity("Failed to list PRDs.")
+				a.writef("Error: %v\n", err)
+			}
+		case "status":
+			target := snap.selectedPRD
+			if len(args) == 1 {
+				target = args[0]
+			}
+			state.setActivity("Showing PRD status.")
+			a.writef("Runtime: state=%s iterations=%d provider=%s last_run_at=%s\n", snap.loopState, snap.iterations, snap.provider, snap.lastRunAt)
+			if err := a.runStatus(store, []string{target}); err != nil {
+				state.setActivity("Failed to read PRD status.")
+				a.writef("Error: %v\n", err)
+			}
+		case "v", "validate":
+			target := snap.selectedPRD
+			if len(args) == 1 {
+				target = args[0]
+			}
+			if err := a.runValidate(store, []string{target}); err != nil {
+				state.setActivity("Validation failed.")
+				a.writef("Error: %v\n", err)
+				continue
+			}
+			state.setActivity("Validation passed.")
+		case "s", "run":
+			runCtx, cancelRun := context.WithCancel(ctx)
+			if !controller.start(cancelRun) {
+				cancelRun()
+				state.setActivity("Loop is already running.")
+				a.writeLine("Loop is already running.")
+				continue
+			}
+			state.setError(nil)
+			state.setPauseRequested(false)
+			state.setStopRequested(false)
+			state.setLoopState("running")
+			state.setActivity("Loop started.")
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "tui start requested")
+			go a.runTUILoopWorker(runCtx, store, cfg, global, baseDir, state, controller)
+		case "p", "pause":
+			state.setPauseRequested(true)
+			controller.requestPause()
+			state.setActivity("Pause requested; waiting for current iteration.")
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "tui pause requested")
+			a.writeLine("Pause requested; current iteration will complete first.")
+		case "x", "stop":
+			state.setStopRequested(true)
+			controller.requestStop()
+			state.setActivity("Stop requested; waiting for current iteration.")
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "tui stop requested")
+			a.writeLine("Stop requested; current iteration will complete first.")
+		case "xx", "stop-now":
+			state.setStopRequested(true)
+			controller.requestStopNow()
+			state.setActivity("Immediate stop requested.")
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "tui stop-now requested")
+			a.writeLine("Immediate stop requested; active iteration was cancelled.")
+		case "f", "filter":
+			if len(args) != 1 {
+				a.writeLine("Usage: f <event-type|all> | filter <event-type|all>")
+				continue
+			}
+			state.setLogFilter(args[0])
+			state.setActivity(fmt.Sprintf("Log filter set to %s.", strings.ToLower(strings.TrimSpace(args[0]))))
+			a.writef("Log filter set to: %s\n", strings.ToLower(strings.TrimSpace(args[0])))
+		case "tail":
+			if len(args) != 1 {
+				a.writeLine("Usage: tail <n>")
+				continue
+			}
+			n, parseErr := strconv.Atoi(args[0])
+			if parseErr != nil || n < 1 {
+				a.writeLine("tail expects a positive integer")
+				continue
+			}
+			state.setLogTail(n)
+			state.setActivity(fmt.Sprintf("Log tail set to %d.", n))
+			a.writef("Log tail set to: %d\n", n)
+		case "q", "quit", "exit":
+			state.setStopRequested(true)
+			controller.requestStopNow()
+			state.setActivity("Exiting TUI.")
+			return nil
+		default:
+			state.setActivity(fmt.Sprintf("Unknown command: %s.", cmd))
+			a.writef("Unknown command: %s (type ? for help)\n", cmd)
+		}
+	}
+}
+
+func (a App) runTUILoopWorker(
+	ctx context.Context,
+	store prd.Store,
+	cfg config.Config,
+	global globalOptions,
+	baseDir string,
+	state *tuiState,
+	controller *loopController,
+) {
+	defer controller.stopRunning()
+
+	for {
+		pause, stop := controller.checkRequests()
+		if stop {
+			state.setStopRequested(false)
+			state.setPauseRequested(false)
+			state.setLoopState("stopped")
+			state.setActivity("Loop stopped.")
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "loop stopped")
+			return
+		}
+		if pause {
+			state.setPauseRequested(false)
+			state.setLoopState("paused")
+			state.setActivity("Loop paused.")
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "loop paused")
+			return
+		}
+
+		snap := state.snapshot()
+		runArgs := []string{}
+		if strings.TrimSpace(snap.selectedPRD) != "" {
+			runArgs = append(runArgs, snap.selectedPRD)
+		}
+		if strings.TrimSpace(snap.provider) != "" {
+			runArgs = append(runArgs, "--provider", strings.TrimSpace(snap.provider))
+		}
+		state.setActivity(fmt.Sprintf("Running iteration %d with provider %s.", snap.iterations+1, snap.provider))
+
+		if err := a.runLoop(ctx, store, cfg, global, baseDir, runArgs); err != nil {
+			if _, stopNow := controller.checkRequests(); stopNow && errors.Is(err, context.Canceled) {
+				state.setStopRequested(false)
+				state.setLoopState("stopped")
+				state.setError(nil)
+				state.setActivity("Loop stopped immediately.")
+				a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "loop stopped immediately")
+				return
+			}
+			state.setError(err)
+			state.setLoopState("error")
+			state.setActivity("Loop error: " + err.Error())
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "loop error: "+err.Error())
+			return
+		}
+		state.setError(nil)
+		state.setStopRequested(false)
+		state.setPauseRequested(false)
+		state.markIterationSuccess(snap.provider)
+		state.setActivity(fmt.Sprintf("Iteration %d completed.", snap.iterations+1))
+
+		name := strings.TrimSpace(snap.selectedPRD)
+		resolvedName, err := store.ResolveName(name)
+		if err != nil {
+			state.setError(err)
+			state.setLoopState("error")
+			state.setActivity("Failed to resolve PRD: " + err.Error())
+			return
+		}
+		doc, err := store.Load(resolvedName)
+		if err != nil {
+			state.setError(err)
+			state.setLoopState("error")
+			state.setActivity("Failed to load PRD: " + err.Error())
+			return
+		}
+		if doc.NextStory() == nil {
+			state.setLoopState("completed")
+			state.setActivity("All stories completed.")
+			a.logTUIRuntimeAction(store, baseDir, state.snapshot(), "loop completed")
+			return
+		}
+	}
+}
+
+func (a App) renderTUIView(store prd.Store, cfg config.Config, baseDir string, state tuiSnapshot) {
+	a.renderStructuredTUIView(store, cfg, baseDir, state)
+}
+
+func (a App) writeLine(text string) {
+	_, _ = fmt.Fprintln(a.out, text)
+}
+
+func (a App) writef(format string, args ...interface{}) {
+	_, _ = fmt.Fprintf(a.out, format, args...)
+}
+
+func (a App) writeJSON(payload map[string]interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		a.writef("{\"ok\":false,\"error\":\"failed to encode plugin response: %s\"}\n", err.Error())
+		return
+	}
+	a.writef("%s\n", string(data))
+}
+
+func (a App) logTUIRuntimeAction(store prd.Store, baseDir string, snap tuiSnapshot, message string) {
+	name, ok := resolveTUIArtifactPRD(store, strings.TrimSpace(snap.selectedPRD))
+	if !ok {
+		return
+	}
+
+	iteration := snap.iterations
+	if iteration < 1 {
+		iteration = 1
+	}
+	_ = appendTUIEvent(baseDir, name, iteration, message)
+	_ = appendTUILog(baseDir, name, message)
+}
+
+func resolveTUIArtifactPRD(store prd.Store, selected string) (string, bool) {
+	if selected != "" {
+		name, err := store.ResolveName(selected)
+		return name, err == nil
+	}
+	name, err := store.AutoDetectName()
+	return name, err == nil
+}
+
+func appendTUIEvent(baseDir, name string, iteration int, message string) error {
+	path := project.PRDEventsPath(baseDir, name)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	payload := map[string]interface{}{
+		"type":      "command_output",
+		"message":   message,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"iteration": iteration,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(append(data, '\n'))
+	return err
+}
+
+func appendTUILog(baseDir, name, message string) error {
+	path := project.PRDAgentLogPath(baseDir, name)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	_, err = file.WriteString("[tui] " + message + "\n")
+	return err
+}
+
+type eventLogEntry struct {
+	Type      string `json:"type"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+	Iteration int    `json:"iteration"`
+}
+
+func readEventEntries(path string) ([]eventLogEntry, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return []eventLogEntry{}, nil
+	}
+	lines := strings.Split(text, "\n")
+	entries := make([]eventLogEntry, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		var entry eventLogEntry
+		if err := json.Unmarshal([]byte(trimmed), &entry); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func filterEventEntries(entries []eventLogEntry, filter string) []eventLogEntry {
+	normalized := strings.TrimSpace(strings.ToLower(filter))
+	if normalized == "" || normalized == "all" {
+		return entries
+	}
+	filtered := make([]eventLogEntry, 0, len(entries))
+	for _, entry := range entries {
+		if strings.ToLower(strings.TrimSpace(entry.Type)) == normalized {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func parseTUITabShortcut(command string) (int, bool) {
+	if len(command) != 1 {
+		return 0, false
+	}
+	if command[0] < '1' || command[0] > '9' {
+		return 0, false
+	}
+	return int(command[0] - '0'), true
 }
 
 func parseGlobalOptions(args []string) (globalOptions, []string, error) {
@@ -279,6 +1162,13 @@ func parseGlobalOptions(args []string) (globalOptions, []string, error) {
 			}
 			options.Provider = strings.TrimSpace(value)
 			options.ProviderSet = true
+		case "worktree":
+			flagValue, parseErr := parseOptionalBoolFlag("worktree", value, hasValue)
+			if parseErr != nil {
+				return globalOptions{}, nil, parseErr
+			}
+			options.Worktree = flagValue
+			options.WorktreeSet = true
 		case "max-retries":
 			if !hasValue {
 				index++
@@ -341,6 +1231,13 @@ func parseRunOptions(args []string) (runOptions, error) {
 			}
 			options.Provider = strings.TrimSpace(value)
 			options.ProviderSet = true
+		case "worktree":
+			flagValue, parseErr := parseOptionalBoolFlag("worktree", value, hasValue)
+			if parseErr != nil {
+				return runOptions{}, parseErr
+			}
+			options.Worktree = flagValue
+			options.WorktreeSet = true
 		case "max-retries":
 			if !hasValue {
 				i++
@@ -405,7 +1302,29 @@ func parseCSV(raw string) []string {
 	return values
 }
 
-func resolveRuntimeSettings(cfg config.Config, global globalOptions, run runOptions) (string, int, []time.Duration, error) {
+func parseOptionalBoolFlag(name, value string, hasValue bool) (bool, error) {
+	if !hasValue {
+		return true, nil
+	}
+	parsed, err := parseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("--%s must be a boolean value", name)
+	}
+	return parsed, nil
+}
+
+func parseBool(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value %q", value)
+	}
+}
+
+func resolveRuntimeSettings(cfg config.Config, global globalOptions, run runOptions) (string, int, []time.Duration, bool, error) {
 	providerName := cfg.Provider.Default
 	if envProvider := strings.TrimSpace(os.Getenv("DAEDALUS_PROVIDER")); envProvider != "" {
 		providerName = envProvider
@@ -417,14 +1336,14 @@ func resolveRuntimeSettings(cfg config.Config, global globalOptions, run runOpti
 		providerName = run.Provider
 	}
 	if strings.TrimSpace(providerName) == "" {
-		return "", 0, nil, fmt.Errorf("provider is required")
+		return "", 0, nil, false, fmt.Errorf("provider is required")
 	}
 
 	maxRetries := cfg.Retry.MaxRetries
 	if envRetries := strings.TrimSpace(os.Getenv("DAEDALUS_MAX_RETRIES")); envRetries != "" {
 		value, err := strconv.Atoi(envRetries)
 		if err != nil || value < 0 {
-			return "", 0, nil, fmt.Errorf("DAEDALUS_MAX_RETRIES must be a non-negative integer")
+			return "", 0, nil, false, fmt.Errorf("DAEDALUS_MAX_RETRIES must be a non-negative integer")
 		}
 		maxRetries = value
 	}
@@ -447,12 +1366,28 @@ func resolveRuntimeSettings(cfg config.Config, global globalOptions, run runOpti
 	}
 
 	if maxRetries > 0 && len(retryDelayStrings) == 0 {
-		return "", 0, nil, fmt.Errorf("retry delays must not be empty when max retries is greater than zero")
+		return "", 0, nil, false, fmt.Errorf("retry delays must not be empty when max retries is greater than zero")
 	}
 
 	retryDelays, err := config.ParseRetryDelays(retryDelayStrings)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, false, err
 	}
-	return providerName, maxRetries, retryDelays, nil
+
+	useWorktree := cfg.Worktree.Enabled
+	if envWorktree := strings.TrimSpace(os.Getenv("DAEDALUS_WORKTREE")); envWorktree != "" {
+		parsed, parseErr := parseBool(envWorktree)
+		if parseErr != nil {
+			return "", 0, nil, false, fmt.Errorf("DAEDALUS_WORKTREE must be a boolean value")
+		}
+		useWorktree = parsed
+	}
+	if global.WorktreeSet {
+		useWorktree = global.Worktree
+	}
+	if run.WorktreeSet {
+		useWorktree = run.Worktree
+	}
+
+	return providerName, maxRetries, retryDelays, useWorktree, nil
 }

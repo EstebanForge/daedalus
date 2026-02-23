@@ -14,6 +14,9 @@ import (
 type Config struct {
 	Provider  ProviderConfig  `toml:"provider"`
 	Retry     RetryConfig     `toml:"retry"`
+	Quality   QualityConfig   `toml:"quality"`
+	Worktree  WorktreeConfig  `toml:"worktree"`
+	UI        UIConfig        `toml:"ui"`
 	Providers ProvidersConfig `toml:"providers"`
 }
 
@@ -24,6 +27,18 @@ type ProviderConfig struct {
 type RetryConfig struct {
 	MaxRetries int      `toml:"max_retries"`
 	Delays     []string `toml:"delays"`
+}
+
+type QualityConfig struct {
+	Commands []string `toml:"commands"`
+}
+
+type WorktreeConfig struct {
+	Enabled bool `toml:"enabled"`
+}
+
+type UIConfig struct {
+	Theme string `toml:"theme"`
 }
 
 type ProvidersConfig struct {
@@ -47,6 +62,15 @@ func Defaults() Config {
 		Retry: RetryConfig{
 			MaxRetries: 3,
 			Delays:     []string{"0s", "5s", "15s"},
+		},
+		Quality: QualityConfig{
+			Commands: []string{"go test ./..."},
+		},
+		Worktree: WorktreeConfig{
+			Enabled: false,
+		},
+		UI: UIConfig{
+			Theme: "auto",
 		},
 		Providers: ProvidersConfig{
 			Codex: GenericProviderConfig{
@@ -126,6 +150,25 @@ func Validate(cfg Config) error {
 		}
 	}
 
+	if len(cfg.Quality.Commands) == 0 {
+		return fmt.Errorf("quality.commands must not be empty")
+	}
+	for _, command := range cfg.Quality.Commands {
+		if strings.TrimSpace(command) == "" {
+			return fmt.Errorf("quality.commands must not contain empty values")
+		}
+	}
+
+	theme := strings.TrimSpace(strings.ToLower(cfg.UI.Theme))
+	if theme == "" {
+		theme = "auto"
+	}
+	switch theme {
+	case "auto", "dark", "light":
+	default:
+		return fmt.Errorf("ui.theme must be one of: auto, dark, light")
+	}
+
 	return nil
 }
 
@@ -154,6 +197,12 @@ func applyFallbacks(cfg *Config) {
 
 	if len(cfg.Retry.Delays) == 0 {
 		cfg.Retry.Delays = defaults.Retry.Delays
+	}
+	if len(cfg.Quality.Commands) == 0 {
+		cfg.Quality.Commands = defaults.Quality.Commands
+	}
+	if strings.TrimSpace(cfg.UI.Theme) == "" {
+		cfg.UI.Theme = defaults.UI.Theme
 	}
 
 	if cfg.Providers.Codex.Model == "" {

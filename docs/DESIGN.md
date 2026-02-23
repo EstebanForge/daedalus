@@ -70,8 +70,9 @@ Controls:
 ## Command surface (v1)
 - `daedalus` (opens TUI)
 - `daedalus run [name]`
+- `daedalus plugin run [name]` (plugin/headless adapter entrypoint)
 - `daedalus new [name] [context...]`
-- `daedalus edit [name]`
+- `daedalus edit [name]` (opens `.daedalus/prds/<name>/prd.md` in local editor)
 - `daedalus list`
 - `daedalus status [name]`
 - `daedalus validate [name]`
@@ -80,8 +81,11 @@ Controls:
 - `s`: start/resume
 - `p`: pause
 - `x`: stop
+- `xx`: immediate stop (cancel active iteration)
 - `t`: toggle dashboard/log view
 - `n`: PRD picker
+- `f`: set logs event filter
+- `tail`: set logs tail length
 - `,`: settings
 - `?`: help
 - `q`: quit
@@ -97,7 +101,8 @@ Controls:
 - Works in low-color terminals.
 - No information conveyed by color alone.
 
-## Open design decisions
-- Headless default for `run` vs shared behavior with TUI.
-- Manual story selection support in v1 or not.
-- Mandatory auto-commit vs operator confirmation.
+## Resolved design decisions (v1)
+- Invoking `daedalus` with no subcommand opens the TUI by default.
+- `daedalus run` is headless by default and does not launch TUI.
+- Manual story selection is out of scope for v1. Story choice is automatic via PRD state machine.
+- Auto-commit is enabled by default after quality gates pass; no confirmation prompt in headless mode.

@@ -19,6 +19,16 @@ All providers use the same non-interactive CLI pattern (`-p` / `--print`) for ex
 - `Capabilities() ProviderCapabilities`
 - `RunIteration(ctx, request) -> (<-chan Event, IterationResult, error)`
 
+`RunIteration` semantics (v1):
+- `error` is for pre-start failures only (invalid request/config, executable missing, launch failure).
+- On pre-start failure, returned event channel must be `nil` and `IterationResult.success` must be `false`.
+- In-flight execution failures are emitted as normalized `error` events.
+- Core runtime treats the event stream (including terminal `error` and `iteration_finished`) as the source of truth for started runs.
+- `IterationResult` may be partial for started runs and is primarily advisory.
+- Provider must close the event channel exactly once for every successful start.
+- On `ctx` cancellation, provider should stop quickly, emit a terminal `error` event with cancellation context when possible, then close the channel.
+- Core consumers must drain events until channel close before evaluating final iteration success/failure.
+
 ## Iteration request
 - `workDir: string`
 - `prompt: string`
@@ -38,6 +48,18 @@ Rules:
 - `summary: string`
 - `usage` (optional token/cost structure)
 - `providerRunID` (optional)
+
+`usage` shape (optional):
+- `inputTokens: int` (optional, `>= 0`)
+- `outputTokens: int` (optional, `>= 0`)
+- `totalTokens: int` (optional, `>= 0`)
+- `currency: string` (optional, ISO 4217 when set, for example `USD`)
+- `estimatedCost: string` (optional decimal string, for example `0.0025`)
+
+Rules:
+- Fields are additive and optional because providers may expose different usage fidelity.
+- When `totalTokens` is omitted but both `inputTokens` and `outputTokens` are present, consumers may infer `totalTokens = inputTokens + outputTokens`.
+- If a provider cannot supply usage safely, `usage` should be omitted rather than guessed.
 
 ## Normalized events
 - `iteration_started`
@@ -59,6 +81,13 @@ Each event contains:
 Rules:
 - Core logic may use `type`, `iteration`, `storyID`.
 - Core logic must not branch on provider-specific metadata keys.
+
+Recommended metadata keys (non-exhaustive):
+- `provider` (for example `claude`)
+- `model` (provider model alias/name)
+- `run_id` (provider-native run/trace identifier)
+- `tool` (tool name for tool lifecycle events)
+- `command` (shell/tool command label)
 
 ## Capabilities model
 - `streaming: bool`

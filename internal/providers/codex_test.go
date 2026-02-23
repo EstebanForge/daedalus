@@ -5,20 +5,21 @@ import (
 	"errors"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/EstebanForge/daedalus/internal/config"
 )
 
-func TestClaudeProviderRunIterationBuildsCLIArgs(t *testing.T) {
+func TestCodexProviderRunIterationBuildsCLIArgs(t *testing.T) {
 	t.Parallel()
 
 	var gotWorkDir string
 	var gotArgs []string
 
-	provider := claudeProvider{
+	provider := codexProvider{
 		cfg: config.GenericProviderConfig{
-			Model:          "claude-sonnet-4-6",
+			Model:          "gpt-5-codex",
 			ApprovalPolicy: "on-request",
 			SandboxPolicy:  "workspace-write",
 		},
@@ -51,21 +52,30 @@ func TestClaudeProviderRunIterationBuildsCLIArgs(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected success result, got %+v", result)
 	}
-	expectedArgs := []string{"-p", "--permission-mode", "acceptEdits", "--model", "claude-sonnet-4-6", "Implement story S-1"}
-	if !reflect.DeepEqual(expectedArgs, gotArgs) {
-		t.Fatalf("unexpected args: got %v want %v", gotArgs, expectedArgs)
-	}
 	if gotWorkDir != "/tmp/work" {
 		t.Fatalf("unexpected work dir: %q", gotWorkDir)
 	}
+	if len(gotArgs) < 9 {
+		t.Fatalf("unexpected args length: %v", gotArgs)
+	}
+	wantPrefix := []string{"exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--output-last-message"}
+	if !reflect.DeepEqual(wantPrefix, gotArgs[:5]) {
+		t.Fatalf("unexpected args prefix: got %v want %v", gotArgs[:5], wantPrefix)
+	}
+	if gotArgs[6] != "--model" || gotArgs[7] != "gpt-5-codex" {
+		t.Fatalf("expected model flags, got %v", gotArgs)
+	}
+	if gotArgs[len(gotArgs)-1] != "Implement story S-1" {
+		t.Fatalf("unexpected prompt arg: %v", gotArgs)
+	}
 }
 
-func TestClaudeProviderRunIterationRejectsUnsupportedApprovalPolicy(t *testing.T) {
+func TestCodexProviderRunIterationRejectsUnsupportedApprovalPolicy(t *testing.T) {
 	t.Parallel()
 
-	provider := claudeProvider{
+	provider := codexProvider{
 		cfg: config.GenericProviderConfig{
-			ApprovalPolicy: "bad-value",
+			ApprovalPolicy: "invalid",
 		},
 	}
 
@@ -75,20 +85,12 @@ func TestClaudeProviderRunIterationRejectsUnsupportedApprovalPolicy(t *testing.T
 	if err == nil {
 		t.Fatal("expected error for unsupported approval policy")
 	}
-
-	var providerErr ProviderError
-	if !errors.As(err, &providerErr) {
-		t.Fatalf("expected ProviderError, got %T", err)
-	}
-	if providerErr.Category != ErrorConfiguration {
-		t.Fatalf("unexpected error category: %s", providerErr.Category)
-	}
 }
 
-func TestClaudeProviderRunIterationEmitsErrorEvents(t *testing.T) {
+func TestCodexProviderRunIterationEmitsErrorEvents(t *testing.T) {
 	t.Parallel()
 
-	provider := claudeProvider{
+	provider := codexProvider{
 		cfg: config.GenericProviderConfig{},
 		run: func(_ context.Context, _ string, _ []string, _ chan Event) (string, error) {
 			return "", errors.New("rate limit exceeded")
@@ -113,10 +115,27 @@ func TestClaudeProviderRunIterationEmitsErrorEvents(t *testing.T) {
 	}
 }
 
-func TestMapClaudeErrorNotFound(t *testing.T) {
+func TestCodexProviderRunIterationRejectsUnsupportedSandboxPolicy(t *testing.T) {
 	t.Parallel()
 
-	err := mapClaudeError(exec.ErrNotFound)
+	provider := codexProvider{
+		cfg: config.GenericProviderConfig{
+			SandboxPolicy: "read-only",
+		},
+	}
+
+	_, _, err := provider.RunIteration(context.Background(), IterationRequest{
+		Prompt: "hello",
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported sandbox policy")
+	}
+}
+
+func TestMapCodexErrorNotFound(t *testing.T) {
+	t.Parallel()
+
+	err := mapCodexError(exec.ErrNotFound)
 	var providerErr ProviderError
 	if !errors.As(err, &providerErr) {
 		t.Fatalf("expected ProviderError, got %T", err)
@@ -126,10 +145,10 @@ func TestMapClaudeErrorNotFound(t *testing.T) {
 	}
 }
 
-func TestMapClaudeErrorRateLimit(t *testing.T) {
+func TestMapCodexErrorRateLimit(t *testing.T) {
 	t.Parallel()
 
-	err := mapClaudeError(errors.New("API returned 429 rate limit exceeded"))
+	err := mapCodexError(errors.New("API returned 429 rate limit exceeded"))
 	var providerErr ProviderError
 	if !errors.As(err, &providerErr) {
 		t.Fatalf("expected ProviderError, got %T", err)
@@ -137,4 +156,36 @@ func TestMapClaudeErrorRateLimit(t *testing.T) {
 	if providerErr.Category != ErrorRateLimit {
 		t.Fatalf("unexpected error category: %s", providerErr.Category)
 	}
+}
+
+func TestReadCodexSummaryFallsBackToRawOutput(t *testing.T) {
+	t.Parallel()
+
+	summary, err := readCodexSummary("/definitely/missing/file", "  model summary  ")
+	if err != nil {
+		t.Fatalf("read summary: %v", err)
+	}
+	if strings.TrimSpace(summary) != "model summary" {
+		t.Fatalf("unexpected summary: %q", summary)
+	}
+}
+
+func collectEvents(events <-chan Event) []Event {
+	if events == nil {
+		return nil
+	}
+
+	collected := make([]Event, 0)
+	for event := range events {
+		collected = append(collected, event)
+	}
+	return collected
+}
+
+func eventTypes(events []Event) []EventType {
+	types := make([]EventType, 0, len(events))
+	for _, event := range events {
+		types = append(types, event.Type)
+	}
+	return types
 }

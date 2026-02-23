@@ -3,6 +3,7 @@ package providers
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 type ErrorCategory string
@@ -60,4 +61,35 @@ func NewConfigurationError(message string, err error) error {
 
 func NewUnknownProviderError(name string) error {
 	return NewConfigurationError(fmt.Sprintf("unknown provider %q", name), nil)
+}
+
+func EncodeEventError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	var providerErr ProviderError
+	if errors.As(err, &providerErr) {
+		return string(providerErr.Category) + "|" + providerErr.Error()
+	}
+	return string(ErrorFatal) + "|" + err.Error()
+}
+
+func DecodeEventError(message string) error {
+	parts := strings.SplitN(strings.TrimSpace(message), "|", 2)
+	if len(parts) != 2 {
+		return ProviderError{
+			Category: ErrorFatal,
+			Message:  strings.TrimSpace(message),
+		}
+	}
+
+	category := ErrorCategory(strings.TrimSpace(parts[0]))
+	text := strings.TrimSpace(parts[1])
+	switch category {
+	case ErrorConfiguration, ErrorAuthentication, ErrorRateLimit, ErrorTimeout, ErrorTransient, ErrorFatal:
+		return ProviderError{Category: category, Message: text}
+	default:
+		return ProviderError{Category: ErrorFatal, Message: text}
+	}
 }

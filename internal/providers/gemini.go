@@ -30,8 +30,5 @@ func (p geminiProvider) Capabilities() Capabilities {
 }
 
 func (p geminiProvider) RunIteration(_ context.Context, _ IterationRequest) (<-chan Event, IterationResult, error) {
-	events := make(chan Event)
-	close(events)
-
-	return events, IterationResult{}, NewConfigurationError("gemini provider module is not implemented yet", nil)
+	return nil, IterationResult{}, NewConfigurationError("gemini provider module is not implemented yet", nil)
 }

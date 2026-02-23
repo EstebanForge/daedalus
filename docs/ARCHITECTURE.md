@@ -21,6 +21,9 @@ Project runtime state:
 - `prds/<name>/events.jsonl`
 - `worktrees/<name>/` (optional)
 
+Artifact schemas and templates are defined in:
+- `docs/reference/artifacts.md`
+
 ## Components
 
 ### App controller
@@ -64,6 +67,19 @@ Loop:
 8. Mark `passes=true`, `inProgress=false`.
 9. Append progress and events.
 
+Prompt/context construction (v1):
+- Prompt is deterministic and built from:
+- project name and PRD description
+- active story ID, title, description, acceptance criteria, and priority
+- explicit completion rule: implement only the active story and satisfy all acceptance criteria
+- explicit safety rule: do not execute destructive git operations
+- explicit output rule: summarize changes and test/check results
+- `contextFiles` are selected in this order:
+- required: `.daedalus/prds/<name>/prd.md`, `.daedalus/prds/<name>/prd.json`, `.daedalus/prds/<name>/progress.md`
+- optional: repository-local guidance files (for example `AGENTS.md`, `README.md`) when present
+- `contextFiles` paths must be unique, repository-relative when possible, and stable in ordering.
+- Provider modules consume `prompt` and `contextFiles` as-is and must not silently rewrite story scope.
+
 ### Provider adapter
 Responsibilities:
 - Isolate provider SDK/CLI usage.
@@ -101,6 +117,7 @@ Normalized events:
 - `error`
 
 Provider-specific event detail must be optional metadata only. Core logic cannot depend on provider-specific fields.
+In v1, started iterations stream normalized events live while the provider process is running. Pre-start failures are returned via `error`; in-flight failures are emitted through `error` events.
 
 ### Provider registry
 Responsibilities:
@@ -114,11 +131,45 @@ Responsibilities:
 - Capture outputs/exit codes.
 - Return structured report.
 
+Contract:
+- `RunChecks(ctx, workDir, commands) -> QualityReport`
+
+`QualityReport`:
+- `passed: bool`
+- `results: []CheckResult`
+
+`CheckResult`:
+- `command: string`
+- `exitCode: int`
+- `stdout: string`
+- `stderr: string`
+- `duration: string`
+
+Rules:
+- All configured commands run in declared order.
+- Any non-zero exit code sets `QualityReport.passed=false`.
+- Loop must not mark story passed or commit when `QualityReport.passed=false`.
+- Quality outputs must be persisted to `events.jsonl` and `progress.md`.
+
 ### Git service
 Responsibilities:
 - Check repository cleanliness.
 - Stage and commit story changes.
 - Manage optional branch/worktree lifecycle.
+
+Contract:
+- `CommitStory(ctx, workDir, storyID, storyTitle) -> CommitResult`
+
+`CommitResult`:
+- `committed: bool`
+- `commitSHA: string` (empty when `committed=false`)
+- `message: string`
+
+Rules:
+- Commit is allowed only after quality gates pass.
+- Commit message format (v1): `feat(US-XXX): Story Title`.
+- Commit failures must keep story as `in_progress` and move loop to `error`.
+- When no changes exist, runtime may skip commit but must record this in `progress.md`.
 
 ### Event bus
 Responsibilities:
@@ -142,6 +193,7 @@ Loop states:
 - Persist artifacts before and after each transition.
 - Keep `inProgress` sticky for safe recovery.
 - Retry settings are user-configurable with safe defaults.
+- On terminal failure, loop enters `error` and current story remains `in_progress` until explicit operator reset.
 
 ## Security model
 - Sanitize user/config/PRD input.
@@ -153,6 +205,9 @@ Loop states:
 - One active loop per PRD.
 - Optional parallel PRDs only through isolated worktrees.
 - Shared structured logger; per-PRD artifact files.
+
+Worktree lifecycle and safety rules are specified in:
+- `docs/reference/worktrees.md`
 
 ## Provider integration notes
 - All seven providers use CLI-based execution with the `-p` / `--print` flag pattern for non-interactive mode.
@@ -173,6 +228,12 @@ Loop states:
 - Golden: native provider event to normalized event mapping.
 - Contract: shared provider test suite all providers must pass.
 - Smoke: CLI command and TUI startup.
+
+Minimum required unit coverage before M1 handoff:
+- `internal/prd`: load/save/validate/select/transition behavior
+- `internal/config`: load, defaults, fallback resolution, and validation rules
+- `internal/loop`: retry/backoff and terminal failure handling
+- `internal/providers`: registry resolution and provider error mapping
 
 ## Implementation phases
 - Phase 1: CLI + PRD service + logs.

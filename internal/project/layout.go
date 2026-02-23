@@ -5,6 +5,7 @@ import "path/filepath"
 const (
 	DirectoryName = ".daedalus"
 	PRDsDirectory = "prds"
+	WorktreesDir  = "worktrees"
 )
 
 func PRDsPath(baseDir string) string {
@@ -25,4 +26,20 @@ func PRDJSONPath(baseDir, name string) string {
 
 func PRDProgressPath(baseDir, name string) string {
 	return filepath.Join(PRDPath(baseDir, name), "progress.md")
+}
+
+func PRDAgentLogPath(baseDir, name string) string {
+	return filepath.Join(PRDPath(baseDir, name), "agent.log")
+}
+
+func PRDEventsPath(baseDir, name string) string {
+	return filepath.Join(PRDPath(baseDir, name), "events.jsonl")
+}
+
+func WorktreesPath(baseDir string) string {
+	return filepath.Join(baseDir, DirectoryName, WorktreesDir)
+}
+
+func WorktreePath(baseDir, name string) string {
+	return filepath.Join(WorktreesPath(baseDir), name)
 }

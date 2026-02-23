@@ -57,6 +57,7 @@ Acceptance:
 - States: `pending -> in_progress -> passed`.
 - Resume prefers existing `in_progress` story.
 - If no in-progress story, pick lowest priority number with `passes=false`.
+- Terminal failures keep the story `in_progress` for explicit operator recovery; no automatic `failed` story state in v1.
 
 ### FR-003 Provider runner abstraction
 System must run agent providers through a stable adapter boundary.
@@ -89,7 +90,7 @@ Acceptance:
 System must support story-scoped commits.
 
 Acceptance:
-- Commit format: `feat: [US-XXX] - [Story Title]`.
+- Commit format: `feat(US-XXX): Story Title`.
 - Commit only after checks pass.
 - Optional worktree/branch isolation mode.
 
@@ -114,6 +115,7 @@ System must run as standalone CLI and as Codex plugin integration.
 Acceptance:
 - Shared core engine, separate entry adapters.
 - Plugin path can invoke loop actions without TUI dependency.
+- Initial adapter command: `daedalus plugin run [name]`.
 
 ## Non-functional requirements
 - Security: sanitize/validate inputs; avoid unsafe shell interpolation.
@@ -161,6 +163,10 @@ Acceptance:
 - Quality gate pipeline.
 - Git commit + optional worktree mode.
 - Tests and docs completion.
+
+### M5 Multi-provider hardening
+- Gemini provider module behind shared provider contract.
+- Multi-provider contract conformance and regression hardening.
 
 ## Risks
 - Provider API/CLI and policy changes.

@@ -11,7 +11,8 @@
         "Story has measurable acceptance criteria."
       ],
       "priority": 1,
-      "passes": false
+      "passes": false,
+      "inProgress": true
     }
   ]
 }

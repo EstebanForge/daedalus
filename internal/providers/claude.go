@@ -12,7 +12,7 @@ import (
 
 type claudeProvider struct {
 	cfg config.GenericProviderConfig
-	run func(ctx context.Context, workDir string, args []string) (string, error)
+	run func(ctx context.Context, workDir string, args []string, events chan Event) (string, error)
 }
 
 func newClaudeProvider(cfg config.Config) Provider {
@@ -36,21 +36,21 @@ func (p claudeProvider) Capabilities() Capabilities {
 }
 
 func (p claudeProvider) RunIteration(ctx context.Context, request IterationRequest) (<-chan Event, IterationResult, error) {
-	events := make(chan Event)
-	close(events)
-
 	if strings.TrimSpace(request.Prompt) == "" {
-		return events, IterationResult{}, NewConfigurationError("claude prompt is required", nil)
+		return nil, IterationResult{}, NewConfigurationError("claude prompt is required", nil)
 	}
 
 	permissionMode, err := mapClaudePermissionMode(request.ApprovalPolicy, p.cfg.ApprovalPolicy)
 	if err != nil {
-		return events, IterationResult{}, err
+		return nil, IterationResult{}, err
 	}
 
 	if err := validateClaudeSandboxPolicy(request.SandboxPolicy, p.cfg.SandboxPolicy); err != nil {
-		return events, IterationResult{}, err
+		return nil, IterationResult{}, err
 	}
+
+	events := make(chan Event, 8)
+	pushProviderEvent(events, EventIterationStarted, "claude iteration started")
 
 	args := []string{"-p", "--permission-mode", permissionMode}
 	model := strings.TrimSpace(request.Model)
@@ -67,16 +67,24 @@ func (p claudeProvider) RunIteration(ctx context.Context, request IterationReque
 		run = runClaudeCLICommand
 	}
 
-	output, err := run(ctx, request.WorkDir, args)
-	if err != nil {
-		return events, IterationResult{}, mapClaudeError(err)
-	}
+	go func() {
+		defer close(events)
 
-	summary := strings.TrimSpace(output)
-	return events, IterationResult{
-		Success: true,
-		Summary: summary,
-	}, nil
+		output, runErr := run(ctx, request.WorkDir, args, events)
+		if runErr != nil {
+			mappedErr := mapClaudeError(runErr)
+			pushProviderEvent(events, EventError, EncodeEventError(mappedErr))
+			pushProviderEvent(events, EventIterationDone, "claude iteration failed")
+			return
+		}
+		pushProviderEvent(events, EventCommandOutput, output)
+
+		summary := strings.TrimSpace(output)
+		pushProviderEvent(events, EventAssistantText, summary)
+		pushProviderEvent(events, EventIterationDone, "claude iteration finished")
+	}()
+
+	return events, IterationResult{Success: true}, nil
 }
 
 func mapClaudePermissionMode(runtimeValue, configValue string) (string, error) {
@@ -116,21 +124,8 @@ func validateClaudeSandboxPolicy(runtimeValue, configValue string) error {
 	}
 }
 
-func runClaudeCLICommand(ctx context.Context, workDir string, args []string) (string, error) {
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	if strings.TrimSpace(workDir) != "" {
-		cmd.Dir = workDir
-	}
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(output))
-		if text == "" {
-			return "", err
-		}
-		return "", fmt.Errorf("%w: %s", err, text)
-	}
-	return string(output), nil
+func runClaudeCLICommand(ctx context.Context, workDir string, args []string, events chan Event) (string, error) {
+	return runCLIStreaming(ctx, "claude", args, workDir, events)
 }
 
 func mapClaudeError(err error) error {
@@ -142,6 +137,8 @@ func mapClaudeError(err error) error {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return ProviderError{Category: ErrorTimeout, Message: err.Error(), Err: err}
 	case errors.Is(err, exec.ErrNotFound):
+		return NewConfigurationError("claude CLI binary not found in PATH", err)
+	case strings.Contains(strings.ToLower(err.Error()), "executable file not found"), strings.Contains(strings.ToLower(err.Error()), "not found in $path"):
 		return NewConfigurationError("claude CLI binary not found in PATH", err)
 	}
 
