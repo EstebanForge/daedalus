@@ -7,23 +7,23 @@ import (
 	"github.com/EstebanForge/daedalus/internal/config"
 )
 
-type geminiProvider struct {
+type piProvider struct {
 	cfg config.GenericProviderConfig
 	run func(ctx context.Context, workDir string, args []string, events chan Event) (string, error)
 }
 
-func newGeminiProvider(cfg config.Config) Provider {
-	return geminiProvider{
-		cfg: cfg.Providers.Gemini,
-		run: runGeminiCLICommand,
+func newPiProvider(cfg config.Config) Provider {
+	return piProvider{
+		cfg: cfg.Providers.Pi,
+		run: runPiCLICommand,
 	}
 }
 
-func (p geminiProvider) Name() string {
-	return "gemini"
+func (p piProvider) Name() string {
+	return "pi"
 }
 
-func (p geminiProvider) Capabilities() Capabilities {
+func (p piProvider) Capabilities() Capabilities {
 	return Capabilities{
 		Streaming:      true,
 		ToolCalls:      true,
@@ -32,13 +32,13 @@ func (p geminiProvider) Capabilities() Capabilities {
 	}
 }
 
-func (p geminiProvider) RunIteration(ctx context.Context, request IterationRequest) (<-chan Event, IterationResult, error) {
+func (p piProvider) RunIteration(ctx context.Context, request IterationRequest) (<-chan Event, IterationResult, error) {
 	if strings.TrimSpace(request.Prompt) == "" {
-		return nil, IterationResult{}, NewConfigurationError("gemini prompt is required", nil)
+		return nil, IterationResult{}, NewConfigurationError("pi prompt is required", nil)
 	}
 
 	events := make(chan Event, 8)
-	pushProviderEvent(events, EventIterationStarted, "gemini iteration started")
+	pushProviderEvent(events, EventIterationStarted, "pi iteration started")
 
 	args := []string{"-p"}
 	model := strings.TrimSpace(request.Model)
@@ -52,7 +52,7 @@ func (p geminiProvider) RunIteration(ctx context.Context, request IterationReque
 
 	run := p.run
 	if run == nil {
-		run = runGeminiCLICommand
+		run = runPiCLICommand
 	}
 
 	go func() {
@@ -60,20 +60,20 @@ func (p geminiProvider) RunIteration(ctx context.Context, request IterationReque
 
 		output, runErr := run(ctx, request.WorkDir, args, events)
 		if runErr != nil {
-			pushProviderEvent(events, EventError, EncodeEventError(mapGenericCLIError("gemini", runErr)))
-			pushProviderEvent(events, EventIterationDone, "gemini iteration failed")
+			pushProviderEvent(events, EventError, EncodeEventError(mapGenericCLIError("pi", runErr)))
+			pushProviderEvent(events, EventIterationDone, "pi iteration failed")
 			return
 		}
 		pushProviderEvent(events, EventCommandOutput, output)
 
 		summary := strings.TrimSpace(output)
 		pushProviderEvent(events, EventAssistantText, summary)
-		pushProviderEvent(events, EventIterationDone, "gemini iteration finished")
+		pushProviderEvent(events, EventIterationDone, "pi iteration finished")
 	}()
 
 	return events, IterationResult{Success: true}, nil
 }
 
-func runGeminiCLICommand(ctx context.Context, workDir string, args []string, events chan Event) (string, error) {
-	return runCLIStreaming(ctx, "gemini", args, workDir, events)
+func runPiCLICommand(ctx context.Context, workDir string, args []string, events chan Event) (string, error) {
+	return runCLIStreaming(ctx, "pi", args, workDir, events)
 }

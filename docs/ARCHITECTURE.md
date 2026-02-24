@@ -129,6 +129,24 @@ Contract:
 - `model: string`
 - `metadata: map[string]string`
 
+### Document templates
+Responsibilities:
+- Provide a canonical, provider-agnostic structure for all planning artifacts.
+- Ensure deterministic document output regardless of which LLM backend is used.
+
+Sources: `internal/templates/` (embedded via `//go:embed`).
+
+Templates:
+- `project-summary.md` — repository scan output (LLM fills in placeholders).
+- `jtbd.md` — Jobs-to-be-Done (human-authored, LLM-drafted in existing-project mode).
+- `architecture-design.md` — architecture context (human-authored, scan-seeded).
+- `prd.md` — PRD narrative document (created with every new PRD).
+
+Rules:
+- All code that generates or seeds these documents must use `internal/templates`.
+- Headings in templates are the single source of truth; changing them requires
+  updating the template file and its tests.
+
 ### Provider registry
 Responsibilities:
 - Resolve provider by key (`codex`, `claude`, `gemini`, `opencode`, `copilot`, `qwen`, `pi`).
@@ -244,19 +262,21 @@ Worktree lifecycle and safety rules are specified in:
 - `docs/reference/worktrees.md`
 
 ## Implementation phases
-- Phase 1: CLI + PRD service + logs.
-- Phase 2: onboarding manager + existing-project discovery scan + context seeding.
-- Phase 3: provider contract + registry + quality gates + TUI runtime controls/views.
-- Phase 4: worktree mode + TUI polish/hardening (richer event streaming, stronger pause/stop lifecycle controls, visual/interaction refinement) + docs finalization.
-- Phase 5: remaining provider implementations (including Gemini), multi-provider hardening, and provider-specific optimizations.
+- [x] Phase 1: CLI + PRD service + logs.
+- [x] Phase 2: onboarding manager + existing-project discovery scan + context seeding.
+- [x] Phase 3: provider contract + registry + quality gates + TUI runtime controls/views.
+- [x] Phase 4: worktree mode + TUI polish/hardening (richer event streaming, stronger pause/stop lifecycle controls, visual/interaction refinement) + docs finalization.
+- [x] Phase 5: remaining provider implementations (including Gemini), multi-provider hardening, and provider-specific optimizations.
 
 ## Provider integration notes
 - All providers use CLI-based non-interactive execution (`-p` / `--prompt` patterns).
-- Codex is current scaffold target.
-- Claude integration is CLI-only through `claude`.
-- Gemini integration is CLI-based and API-key oriented.
+- All 7 providers are fully implemented: codex, claude, gemini, opencode, copilot, qwen, pi.
+- Codex and Claude support sandbox and approval policy configuration.
+- Gemini requires API key authentication (not OAuth).
+- Copilot uses `--prompt` flag instead of `-p`.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.
+- All providers pass the shared contract test suite in `internal/providers/contract_test.go`.
 
 ## Testing strategy
 - Unit: onboarding transitions, PRD transitions, selection logic, retry policy.

@@ -13,9 +13,13 @@ type Registry struct {
 func NewRegistry() Registry {
 	return Registry{
 		builders: map[string]func(config.Config) Provider{
-			"codex":  newCodexProvider,
-			"claude": newClaudeProvider,
-			"gemini": newGeminiProvider,
+			"codex":    newCodexProvider,
+			"claude":   newClaudeProvider,
+			"gemini":   newGeminiProvider,
+			"opencode": newOpencodeProvider,
+			"copilot":  newCopilotProvider,
+			"qwen":     newQwenProvider,
+			"pi":       newPiProvider,
 		},
 	}
 }

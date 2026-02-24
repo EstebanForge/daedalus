@@ -17,6 +17,7 @@ import (
 	"github.com/EstebanForge/daedalus/internal/config"
 	daedalusgit "github.com/EstebanForge/daedalus/internal/git"
 	"github.com/EstebanForge/daedalus/internal/loop"
+	"github.com/EstebanForge/daedalus/internal/onboarding"
 	"github.com/EstebanForge/daedalus/internal/prd"
 	"github.com/EstebanForge/daedalus/internal/project"
 	"github.com/EstebanForge/daedalus/internal/providers"
@@ -516,6 +517,15 @@ func (a App) runValidate(store prd.Store, args []string) error {
 }
 
 func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string, args []string) error {
+	ob := onboarding.NewManager(baseDir)
+	required, obErr := ob.IsRequired()
+	if obErr != nil {
+		return fmt.Errorf("onboarding check failed: %w", obErr)
+	}
+	if required {
+		return fmt.Errorf("run onboarding first: daedalus (without arguments)")
+	}
+
 	run, err := parseRunOptions(args)
 	if err != nil {
 		return err
@@ -661,6 +671,21 @@ func runEditorCommand(ctx context.Context, command string, args []string) error 
 }
 
 func (a App) runTUI(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string) error {
+	// Onboarding is only presented when we can show an interactive TUI.
+	// Command-mode / piped usage skips the onboarding gate entirely.
+	if shouldUseInteractiveTUI(a.in, a.out) {
+		ob := onboarding.NewManager(baseDir)
+		required, err := ob.IsRequired()
+		if err != nil {
+			return fmt.Errorf("onboarding check failed: %w", err)
+		}
+		if required {
+			if err := a.runOnboardingTUI(ctx, store, cfg, baseDir, ob); err != nil {
+				return fmt.Errorf("onboarding failed: %w", err)
+			}
+		}
+	}
+
 	state := &tuiState{
 		selectedPRD:  "",
 		view:         "dashboard",

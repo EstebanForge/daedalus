@@ -164,7 +164,7 @@ Retry guidance:
 - Requires authentication based on selected provider.
 
 ## Test requirements (all providers)
-- Pass shared contract test suite.
-- Pass event mapping golden tests.
-- Pass one integration run in fixture repository.
-- Support cancellation and graceful shutdown behavior.
+- [x] Pass shared contract test suite (`internal/providers/contract_test.go` — 7 properties × 7 providers).
+- [ ] Pass event mapping golden tests.
+- [ ] Pass one integration run in fixture repository.
+- [x] Support cancellation and graceful shutdown behavior.

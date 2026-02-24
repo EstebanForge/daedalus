@@ -43,3 +43,25 @@ func WorktreesPath(baseDir string) string {
 func WorktreePath(baseDir, name string) string {
 	return filepath.Join(WorktreesPath(baseDir), name)
 }
+
+const OnboardingDirectory = "onboarding"
+
+func OnboardingPath(workDir string) string {
+	return filepath.Join(workDir, DirectoryName, OnboardingDirectory)
+}
+
+func OnboardingStatePath(workDir string) string {
+	return filepath.Join(OnboardingPath(workDir), "state.json")
+}
+
+func PRDProjectSummaryPath(workDir, name string) string {
+	return filepath.Join(PRDPath(workDir, name), "project-summary.md")
+}
+
+func PRDJTBDPath(workDir, name string) string {
+	return filepath.Join(PRDPath(workDir, name), "jtbd.md")
+}
+
+func PRDArchitecturePath(workDir, name string) string {
+	return filepath.Join(PRDPath(workDir, name), "architecture-design.md")
+}

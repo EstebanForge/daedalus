@@ -833,7 +833,6 @@ func tuiSettingsLines(cfg config.Config, state tuiSnapshot) []string {
 		"Agent adapters:",
 	}
 	lines = append(lines, tuiProviderStatusLines(cfg, provider)...)
-	lines = append(lines, "", "Extensible: register additional adapter keys (for example copilot, opencode) in internal/providers.")
 	return lines
 }
 
@@ -847,6 +846,10 @@ func tuiProviderStatusLines(cfg config.Config, active string) []string {
 		{name: "codex", enabled: cfg.Providers.Codex.Enabled, model: cfg.Providers.Codex.Model},
 		{name: "claude", enabled: cfg.Providers.Claude.Enabled, model: cfg.Providers.Claude.Model},
 		{name: "gemini", enabled: cfg.Providers.Gemini.Enabled, model: cfg.Providers.Gemini.Model},
+		{name: "opencode", enabled: cfg.Providers.OpenCode.Enabled, model: cfg.Providers.OpenCode.Model},
+		{name: "copilot", enabled: cfg.Providers.Copilot.Enabled, model: cfg.Providers.Copilot.Model},
+		{name: "qwen", enabled: cfg.Providers.Qwen.Enabled, model: cfg.Providers.Qwen.Model},
+		{name: "pi", enabled: cfg.Providers.Pi.Enabled, model: cfg.Providers.Pi.Model},
 	}
 
 	normalizedActive := strings.ToLower(strings.TrimSpace(active))

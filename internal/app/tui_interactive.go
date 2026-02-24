@@ -513,7 +513,7 @@ func (m interactiveTUIModel) cyclePRD(step int) {
 }
 
 func (m interactiveTUIModel) cycleProvider(step int) {
-	keys := []string{"codex", "claude", "gemini"}
+	keys := []string{"codex", "claude", "gemini", "opencode", "copilot", "qwen", "pi"}
 	current := strings.ToLower(strings.TrimSpace(m.state.snapshot().provider))
 	if current != "" && !slices.Contains(keys, current) {
 		keys = append(keys, current)

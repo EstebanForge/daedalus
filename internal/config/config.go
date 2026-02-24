@@ -42,9 +42,13 @@ type UIConfig struct {
 }
 
 type ProvidersConfig struct {
-	Codex  GenericProviderConfig `toml:"codex"`
-	Claude GenericProviderConfig `toml:"claude"`
-	Gemini GenericProviderConfig `toml:"gemini"`
+	Codex    GenericProviderConfig `toml:"codex"`
+	Claude   GenericProviderConfig `toml:"claude"`
+	Gemini   GenericProviderConfig `toml:"gemini"`
+	OpenCode GenericProviderConfig `toml:"opencode"`
+	Copilot  GenericProviderConfig `toml:"copilot"`
+	Qwen     GenericProviderConfig `toml:"qwen"`
+	Pi       GenericProviderConfig `toml:"pi"`
 }
 
 type GenericProviderConfig struct {

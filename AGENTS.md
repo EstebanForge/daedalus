@@ -17,12 +17,17 @@ This file is the operating guide for agents working in the Daedalus repository.
 
 ## Current Architecture
 - `cmd/daedalus/main.go`: binary entrypoint
-- `internal/app`: CLI routing and runtime option resolution
+- `internal/app`: CLI routing, TUI, onboarding TUI, runtime option resolution
 - `internal/config`: TOML config defaults/load/validate
+- `internal/onboarding`: onboarding state machine and manager
 - `internal/prd`: PRD model, validation, storage
 - `internal/loop`: story execution loop + retry policy
-- `internal/providers`: provider contract, errors, registry, provider modules
+- `internal/providers`: provider contract, errors, registry, all 7 provider modules
+- `internal/quality`: quality gate runner (executes configured check commands)
+- `internal/git`: story-scoped commit service
+- `internal/worktree`: git worktree lifecycle manager
 - `internal/project`: `.daedalus/` path conventions
+- `internal/templates`: embedded canonical markdown templates for all planning artifacts
 - `docs/`: all planning/architecture/design/reference markdown
 
 ## Non-Negotiable Design Rules
@@ -93,5 +98,19 @@ This file is the operating guide for agents working in the Daedalus repository.
 - Fail fast on invalid config, invalid provider key, and invalid retry values.
 
 ## Implementation Notes
-- `internal/agent` is legacy scaffold and should be phased out in favor of `internal/providers`.
 - Prefer adding tests with new behavior, especially for config parsing, provider resolution, and retry handling.
+- All seven providers (codex, claude, gemini, opencode, copilot, qwen, pi) are fully implemented in `internal/providers`.
+- Shared provider contract tests live in `internal/providers/contract_test.go` — all new providers must pass them.
+- All planning artifact generation (project-summary, jtbd, architecture-design, prd) must use `internal/templates` as the canonical structure source. Do not hard-code markdown headings or sections elsewhere.
+
+## Document Templates
+Canonical templates for all planning artifacts are embedded in `internal/templates/`:
+- `project-summary.md` — LLM fills this in during the onboarding repository scan.
+- `jtbd.md` — Jobs-to-be-Done; human-authored, LLM-drafted in existing-project mode.
+- `architecture-design.md` — Architecture context; human-authored, scan-seeded in existing-project mode.
+- `prd.md` — PRD narrative; created alongside every new prd.json.
+
+Rules:
+- The templates are the single source of truth for document structure.
+- Any code that generates or seeds these documents must import `internal/templates`.
+- Headings must not be changed without updating the corresponding template and its tests.

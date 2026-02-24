@@ -1,8 +1,10 @@
 package providers
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -73,6 +75,45 @@ func EncodeEventError(err error) string {
 		return string(providerErr.Category) + "|" + providerErr.Error()
 	}
 	return string(ErrorFatal) + "|" + err.Error()
+}
+
+// mapGenericCLIError classifies a CLI subprocess error into a typed ProviderError.
+// binary is the CLI binary name used only in the "not found" message.
+func mapGenericCLIError(binary string, err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return ProviderError{Category: ErrorTimeout, Message: err.Error(), Err: err}
+	case errors.Is(err, exec.ErrNotFound):
+		return NewConfigurationError(binary+" CLI binary not found in PATH", err)
+	}
+
+	lowMsg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(lowMsg, "executable file not found"),
+		strings.Contains(lowMsg, "not found in $path"):
+		return NewConfigurationError(binary+" CLI binary not found in PATH", err)
+	case strings.Contains(lowMsg, "authentication"),
+		strings.Contains(lowMsg, "auth"),
+		strings.Contains(lowMsg, "token"),
+		strings.Contains(lowMsg, "unauthorized"):
+		return ProviderError{Category: ErrorAuthentication, Message: err.Error(), Err: err}
+	case strings.Contains(lowMsg, "rate limit"),
+		strings.Contains(lowMsg, "429"):
+		return ProviderError{Category: ErrorRateLimit, Message: err.Error(), Err: err}
+	case strings.Contains(lowMsg, "timeout"),
+		strings.Contains(lowMsg, "timed out"),
+		strings.Contains(lowMsg, "deadline exceeded"):
+		return ProviderError{Category: ErrorTimeout, Message: err.Error(), Err: err}
+	case strings.Contains(lowMsg, "temporar"),
+		strings.Contains(lowMsg, "unavailable"),
+		strings.Contains(lowMsg, "try again"):
+		return ProviderError{Category: ErrorTransient, Message: err.Error(), Err: err}
+	default:
+		return ProviderError{Category: ErrorFatal, Message: err.Error(), Err: err}
+	}
 }
 
 func DecodeEventError(message string) error {

@@ -5,14 +5,12 @@
 
 ## Runtime startup behavior
 
-### Current scaffold behavior
+### Startup behavior
 - `daedalus` launches the TUI runtime.
-- If not in an interactive terminal, Daedalus falls back to command mode.
-
-### Planned workflow extension (proposal v1.4)
-- If `.daedalus/` is missing, or onboarding state is incomplete, Daedalus starts onboarding before normal runtime.
+- If `.daedalus/` is missing or onboarding state is incomplete, Daedalus starts onboarding before normal runtime.
 - Onboarding resumes at the first incomplete step.
-- Existing-project discovery runs only when any file/folder other than `.daedalus/` exists in the current directory.
+- Existing-project discovery runs when any file/folder other than `.daedalus/` exists in the current directory.
+- If not in an interactive terminal, Daedalus falls back to command mode.
 
 ## Global flags (implemented)
 - `--config <path>`
@@ -22,7 +20,7 @@
 - `--retry-delays <csv-duration>`
 
 Provider selection:
-- Supported keys in current scaffold: `codex`, `claude`, `gemini`
+- Supported keys: `codex`, `claude`, `gemini`, `opencode`, `copilot`, `qwen`, `pi`
 - Default: `codex`
 
 Retry defaults:

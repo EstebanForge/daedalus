@@ -17,11 +17,22 @@ Workflow-extension onboarding artifacts:
 - `agent.log`
 - `events.jsonl`
 
-### Onboarding/context files (proposal-aligned, planned)
+### Onboarding/context files (implemented)
 - `.daedalus/onboarding/state.json`
 - `.daedalus/prds/<name>/project-summary.md`
 - `.daedalus/prds/<name>/jtbd.md`
 - `.daedalus/prds/<name>/architecture-design.md`
+
+All three markdown files above are generated from canonical templates embedded in
+`internal/templates/`. The templates define fixed section headings that must be
+preserved regardless of which LLM provider produced the content. This ensures
+deterministic structure across all seven provider backends.
+
+Template source files:
+- `internal/templates/project-summary.md`
+- `internal/templates/jtbd.md`
+- `internal/templates/architecture-design.md`
+- `internal/templates/prd.md`
 
 ## `prd.md` role
 - Narrative planning context for project/stories.
@@ -79,7 +90,7 @@ Retry:
 - `error`
 - `cancelled`
 
-## `onboarding/state.json` format (planned)
+## `onboarding/state.json` format (implemented)
 Tracks onboarding completion and resumption.
 
 Suggested shape:
@@ -101,7 +112,7 @@ Rules:
 - Startup runs onboarding when file is missing or `completed=false`.
 - Resume starts from first incomplete step.
 
-## Existing-project scan outputs (planned)
+## Existing-project scan outputs (implemented)
 - `project-summary.md` contains structured repository summary sections:
 - `purpose`
 - `architecture`

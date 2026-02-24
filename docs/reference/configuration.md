@@ -46,6 +46,18 @@ enabled = false
 
 [providers.gemini]
 enabled = false
+
+[providers.opencode]
+enabled = false
+
+[providers.copilot]
+enabled = false
+
+[providers.qwen]
+enabled = false
+
+[providers.pi]
+enabled = false
 ```
 
 ## Planned extension example (workflow proposal v1.4)
@@ -91,10 +103,14 @@ auto_pr_on_complete = false
   - `auto` attempts environment detection; falls back to `dark`.
 
 ### `[providers.<key>]`
-Current scaffold keys:
+Supported keys:
 - `codex`
 - `claude`
 - `gemini`
+- `opencode`
+- `copilot`
+- `qwen`
+- `pi`
 
 Common fields:
 - `enabled: bool`
@@ -102,13 +118,12 @@ Common fields:
 - `approval_policy: string`
 - `sandbox_policy: string`
 
-Current defaults:
+Defaults:
 - `providers.codex.enabled = true`
 - `providers.codex.model = "default"`
 - `providers.codex.approval_policy = "on-failure"`
 - `providers.codex.sandbox_policy = "workspace-write"`
-- `providers.claude.enabled = false`
-- `providers.gemini.enabled = false`
+- All other providers: `enabled = false`
 
 Policy value notes:
 - `approval_policy` values used by scaffold/provider docs: `on-failure`, `on-request`, `never`

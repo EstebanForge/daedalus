@@ -175,36 +175,38 @@ Acceptance:
 
 ## Milestones
 
-### M1 Foundation
-- CLI skeleton: `new`, `list`, `status`, `validate`, `run`.
-- PRD service + schema validation.
-- Durable state layout.
-- Onboarding trigger/resume scaffold.
+### M1 Foundation ✓
+- [x] CLI skeleton: `new`, `list`, `status`, `validate`, `run`.
+- [x] PRD service + schema validation.
+- [x] Durable state layout.
+- [x] Onboarding trigger/resume scaffold.
 
-### M2 Onboarding and context seeding
-- Git-ignore decision screen.
-- Existing-project detection + background scan + progress UI.
-- JTBD capture/review flow.
-- Seed JTBD/Architecture context docs.
+### M2 Onboarding and context seeding ✓
+- [x] Git-ignore decision screen.
+- [x] Existing-project detection + background scan + progress UI.
+- [x] JTBD capture/review flow.
+- [x] Seed JTBD/Architecture context docs.
 
-### M3 Loop core + TUI
-- Story picker and transition engine.
-- Codex provider adapter integration.
-- Dashboard + story list + logs + settings.
-- Runtime controls (start/pause/stop/resume).
+### M3 Loop core + TUI ✓
+- [x] Story picker and transition engine.
+- [x] Codex provider adapter integration.
+- [x] Dashboard + story list + logs + settings.
+- [x] Runtime controls (start/pause/stop/resume).
 
-### M4 Hardening
-- Quality gate pipeline.
-- Git commit + optional worktree mode.
-- TUI polish and hardening:
-- richer live event streaming
-- stronger pause/stop lifecycle controls
-- visual/interaction refinement
-- Tests and docs completion.
+### M4 Hardening ✓
+- [x] Quality gate pipeline.
+- [x] Git commit + optional worktree mode.
+- [x] TUI polish and hardening:
+  - richer live event streaming
+  - stronger pause/stop lifecycle controls
+  - visual/interaction refinement
+- [x] Tests and docs completion.
 
-### M5 Multi-provider hardening
-- Gemini provider module behind shared provider contract.
-- Multi-provider contract conformance and regression hardening.
+### M5 Multi-provider hardening ✓
+- [x] Gemini provider module behind shared provider contract.
+- [x] Multi-provider contract conformance and regression hardening.
+- [x] All 7 providers implemented: codex, claude, gemini, opencode, copilot, qwen, pi.
+- [x] Shared contract test suite covering all providers.
 
 ## Risks
 - Provider API/CLI and policy changes.
@@ -228,6 +230,7 @@ Acceptance:
 - [x] Define milestones and risk controls.
 - [x] Finalize MVP command contract with exact CLI syntax.
 - [x] Start implementation scaffold.
-- [ ] Implement onboarding + existing-project discovery flow.
-- [ ] Complete Gemini provider module implementation.
-- [ ] Complete TUI polish and hardening scope.
+- [x] Implement onboarding + existing-project discovery flow.
+- [x] Complete Gemini provider module implementation.
+- [x] Complete all provider module implementations (OpenCode, Copilot, Qwen Code, Pi).
+- [x] Complete TUI polish and hardening scope.

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/EstebanForge/daedalus/internal/project"
+	"github.com/EstebanForge/daedalus/internal/templates"
 )
 
 type Summary struct {
@@ -178,14 +179,5 @@ func defaultJSON(name string) Document {
 
 func defaultMarkdown(name string) string {
 	projectName := filepath.Base(name)
-	return "# " + projectName + "\n\n" +
-		"## Overview\n" +
-		"Describe the project goals.\n\n" +
-		"## User Stories\n\n" +
-		"### US-001: Define first implementation story\n" +
-		"**Priority:** 1\n" +
-		"**Description:** As an operator, I want to define my first actionable story so that Daedalus can run a concrete iteration.\n\n" +
-		"**Acceptance Criteria:**\n" +
-		"- [ ] Story has clear objective.\n" +
-		"- [ ] Story has measurable acceptance criteria.\n"
+	return strings.ReplaceAll(templates.PRD, "[Project Name]", projectName)
 }
