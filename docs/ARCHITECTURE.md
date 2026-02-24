@@ -1,24 +1,27 @@
-# Daedalus Architecture
+# Daedalus Architecture & Design
 
 ## System shape
 Three-layer local-first architecture:
 - Interface layer: CLI + TUI + plugin entry.
-- Core layer: PRD service, loop manager, quality and git services.
+- Core layer: onboarding manager, PRD service, loop manager, quality and git services.
 - Adapter layer: provider modules (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi CLI).
 
 ## Directory layout
 Global config (Linux/XDG):
 - `~/.config/daedalus/config.toml`
-or if `XDG_CONFIG_HOME` is set:
-- `$XDG_CONFIG_HOME/daedalus/config.toml`
+- `$XDG_CONFIG_HOME/daedalus/config.toml` when `XDG_CONFIG_HOME` is set.
 
 Project runtime state:
-`.daedalus/`
+- `.daedalus/`
+- `onboarding/state.json` (onboarding progress + completion marker)
 - `prds/<name>/prd.md`
 - `prds/<name>/prd.json`
 - `prds/<name>/progress.md`
 - `prds/<name>/agent.log`
 - `prds/<name>/events.jsonl`
+- `prds/<name>/project-summary.md` (existing-project scan output)
+- `prds/<name>/jtbd.md` (captured/reviewed JTBD)
+- `prds/<name>/architecture-design.md` (scan-seeded architecture context)
 - `worktrees/<name>/` (optional)
 
 Artifact schemas and templates are defined in:
@@ -31,6 +34,32 @@ Responsibilities:
 - Process lifecycle.
 - Dependency wiring.
 - Command routing.
+- Enforce startup ordering: onboarding first when required.
+
+### Onboarding manager
+Responsibilities:
+- Detect whether onboarding is required.
+- Resume onboarding at first incomplete step.
+- Differentiate empty folder mode vs existing project mode.
+- Run project discovery scan for existing projects.
+- Seed planning context artifacts for JTBD/PRD/Architecture docs.
+
+Startup contract:
+1. Check `.daedalus/` existence and `onboarding/state.json` completion marker.
+2. If onboarding complete, continue to normal runtime.
+3. If onboarding required, execute screen flow:
+- Git ignore decision.
+- Existing project discovery (if directory has any file/folder other than `.daedalus/`).
+- JTBD capture/review.
+- Initial PRD creation.
+4. Persist step completion atomically after each successful screen.
+
+Existing project scan contract:
+- Trigger: any file/folder besides `.daedalus/` in current working directory.
+- Execution: agent-driven scan via Agents CLI prompts.
+- Mode: read-only.
+- UX: background execution with loader/spinner and status text.
+- Failure: actionable error + retry without discarding previous onboarding answers.
 
 ### PRD service
 Responsibilities:
@@ -74,11 +103,11 @@ Prompt/context construction (v1):
 - explicit completion rule: implement only the active story and satisfy all acceptance criteria
 - explicit safety rule: do not execute destructive git operations
 - explicit output rule: summarize changes and test/check results
-- `contextFiles` are selected in this order:
+- `contextFiles` selection order:
 - required: `.daedalus/prds/<name>/prd.md`, `.daedalus/prds/<name>/prd.json`, `.daedalus/prds/<name>/progress.md`
-- optional: repository-local guidance files (for example `AGENTS.md`, `README.md`) when present
-- `contextFiles` paths must be unique, repository-relative when possible, and stable in ordering.
-- Provider modules consume `prompt` and `contextFiles` as-is and must not silently rewrite story scope.
+- optional: `.daedalus/prds/<name>/project-summary.md`, `.daedalus/prds/<name>/jtbd.md`, `.daedalus/prds/<name>/architecture-design.md`
+- optional: repository-local guidance files (`AGENTS.md`, `README.md`) when present
+- `contextFiles` must be unique and stable in ordering.
 
 ### Provider adapter
 Responsibilities:
@@ -100,25 +129,6 @@ Contract:
 - `model: string`
 - `metadata: map[string]string`
 
-`ProviderCapabilities`:
-- `streaming: bool`
-- `toolCalls: bool`
-- `sandboxControl: bool`
-- `approvalModes: []string`
-- `maxContextHint: int` (optional advisory)
-
-Normalized events:
-- `iteration_started`
-- `assistant_text`
-- `tool_started`
-- `tool_finished`
-- `command_output`
-- `iteration_finished`
-- `error`
-
-Provider-specific event detail must be optional metadata only. Core logic cannot depend on provider-specific fields.
-In v1, started iterations stream normalized events live while the provider process is running. Pre-start failures are returned via `error`; in-flight failures are emitted through `error` events.
-
 ### Provider registry
 Responsibilities:
 - Resolve provider by key (`codex`, `claude`, `gemini`, `opencode`, `copilot`, `qwen`, `pi`).
@@ -134,22 +144,11 @@ Responsibilities:
 Contract:
 - `RunChecks(ctx, workDir, commands) -> QualityReport`
 
-`QualityReport`:
-- `passed: bool`
-- `results: []CheckResult`
-
-`CheckResult`:
-- `command: string`
-- `exitCode: int`
-- `stdout: string`
-- `stderr: string`
-- `duration: string`
-
 Rules:
 - All configured commands run in declared order.
 - Any non-zero exit code sets `QualityReport.passed=false`.
-- Loop must not mark story passed or commit when `QualityReport.passed=false`.
-- Quality outputs must be persisted to `events.jsonl` and `progress.md`.
+- Loop must not mark story passed or commit when checks fail.
+- Quality outputs persist to `events.jsonl` and `progress.md`.
 
 ### Git service
 Responsibilities:
@@ -160,23 +159,55 @@ Responsibilities:
 Contract:
 - `CommitStory(ctx, workDir, storyID, storyTitle) -> CommitResult`
 
-`CommitResult`:
-- `committed: bool`
-- `commitSHA: string` (empty when `committed=false`)
-- `message: string`
-
 Rules:
 - Commit is allowed only after quality gates pass.
-- Commit message format (v1): `feat(US-XXX): Story Title`.
-- Commit failures must keep story as `in_progress` and move loop to `error`.
-- When no changes exist, runtime may skip commit but must record this in `progress.md`.
+- Commit message format: `feat(US-XXX): Story Title`.
+- Commit failures keep story `in_progress` and move loop to `error`.
+- No changes may skip commit but must be recorded in `progress.md`.
 
-### Event bus
-Responsibilities:
-- Ordered event fanout to TUI and logs.
-- Buffered delivery with backpressure handling.
+## UX design
+
+### Product UX intent
+- Operator-first.
+- High signal, low friction.
+- Deterministic controls.
+
+### Onboarding screens
+1. Git ignore decision with pros/cons/use-cases.
+2. Existing-project discovery (conditional) with background scan progress UI.
+3. JTBD capture/review.
+4. First PRD creation with path preview.
+
+### Runtime screen model
+- Dashboard: loop state, provider, story, quality status, worktree context.
+- Stories: ordered stories with state badges and criteria count.
+- Logs: streaming events with filtering.
+- Settings: effective provider/retry/worktree/theme/quality config.
+
+### Core interaction flows
+- Onboarding-first bootstrap.
+- Run loop lifecycle.
+- Pause/resume.
+- Failure/recovery.
+
+### Visual and accessibility rules
+- Dense layout; no decorative noise.
+- Color indicates state only.
+- Stable location for critical status.
+- Warnings/errors include next action text.
+- Full keyboard navigation.
+- No information conveyed by color alone.
 
 ## State models
+
+Onboarding states:
+- `not_started -> in_progress -> completed`
+- `in_progress` tracks per-step completion markers.
+- Startup resumes from first incomplete step.
+
+Project mode states:
+- `empty_folder`
+- `existing_project`
 
 Story states:
 - `pending -> in_progress -> passed`
@@ -194,50 +225,42 @@ Loop states:
 - Keep `inProgress` sticky for safe recovery.
 - Retry settings are user-configurable with safe defaults.
 - On terminal failure, loop enters `error` and current story remains `in_progress` until explicit operator reset.
+- On onboarding scan failure, keep onboarding state and allow retry.
 
 ## Security model
 - Sanitize user/config/PRD input.
 - Do not interpolate model text directly into shell commands.
 - Require explicit capability checks for destructive git actions.
-- Keep post-completion network hooks opt-in and disabled by default.
+- Project discovery scan must be read-only.
+- Post-completion network hooks remain opt-in and disabled by default.
 
 ## Concurrency model
 - One active loop per PRD.
+- One active onboarding session per repository.
 - Optional parallel PRDs only through isolated worktrees.
 - Shared structured logger; per-PRD artifact files.
 
 Worktree lifecycle and safety rules are specified in:
 - `docs/reference/worktrees.md`
 
+## Implementation phases
+- Phase 1: CLI + PRD service + logs.
+- Phase 2: onboarding manager + existing-project discovery scan + context seeding.
+- Phase 3: provider contract + registry + quality gates + TUI runtime controls/views.
+- Phase 4: worktree mode + TUI polish/hardening (richer event streaming, stronger pause/stop lifecycle controls, visual/interaction refinement) + docs finalization.
+- Phase 5: remaining provider implementations (including Gemini), multi-provider hardening, and provider-specific optimizations.
+
 ## Provider integration notes
-- All seven providers use CLI-based execution with the `-p` / `--print` flag pattern for non-interactive mode.
-- Codex is v1 implementation target.
-- Claude integration is CLI-only through the `claude` binary; no Claude SDK dependency in Daedalus core or adapter contracts.
-- Claude OAuth is not a dependency for Daedalus integration; authentication is delegated to the local Claude CLI session/token setup.
-- Gemini CLI uses `-p/--prompt` for non-interactive mode. **Requires API key** (not OAuth) to comply with Google ToS.
-- OpenCode CLI uses `-p` or direct prompt for non-interactive mode.
-- Copilot CLI uses `-p/--prompt` for non-interactive mode.
-- Qwen Code uses `-p` for headless mode. Supports Qwen OAuth (free tier) or API keys. **API key required for CI/automation.**
-- Pi CLI uses `-p` for non-interactive mode. Supports multiple providers via `--provider` flag.
+- All providers use CLI-based non-interactive execution (`-p` / `--prompt` patterns).
+- Codex is current scaffold target.
+- Claude integration is CLI-only through `claude`.
+- Gemini integration is CLI-based and API-key oriented.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.
 
 ## Testing strategy
-- Unit: PRD transitions, selection logic, retry policy.
-- Integration: full single-story loop in fixture repository per provider.
+- Unit: onboarding transitions, PRD transitions, selection logic, retry policy.
+- Integration: single-story loop in fixture repository per provider.
 - Golden: native provider event to normalized event mapping.
 - Contract: shared provider test suite all providers must pass.
 - Smoke: CLI command and TUI startup.
-
-Minimum required unit coverage before M1 handoff:
-- `internal/prd`: load/save/validate/select/transition behavior
-- `internal/config`: load, defaults, fallback resolution, and validation rules
-- `internal/loop`: retry/backoff and terminal failure handling
-- `internal/providers`: registry resolution and provider error mapping
-
-## Implementation phases
-- Phase 1: CLI + PRD service + logs.
-- Phase 2: provider contract + registry + quality gates.
-- Phase 3: All seven provider implementations (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi) + TUI runtime controls and views.
-- Phase 4: worktree mode + hardening + docs finalization.
-- Phase 5: Multi-provider hardening + provider-specific optimizations.

@@ -4,23 +4,24 @@
 Daedalus
 
 ## One-liner
-Codex-native autonomous delivery loop with a TUI, PRD-driven execution, and strict quality gates.
+Codex-native autonomous delivery loop with onboarding-first setup, project discovery, PRD-driven execution, and strict quality gates.
 
 ## Problem
 Large implementation sessions degrade as context grows. Teams lose determinism, quality drifts, and commit history becomes noisy. We need a repeatable story-at-a-time loop with explicit operator control.
 
 ## Goal
-Build an autonomous delivery orchestrator supporting Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, and Pi CLI — all through their non-interactive CLI modes.
+Build an autonomous delivery orchestrator supporting Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, and Pi CLI through their non-interactive CLI modes.
 - Executes one user story per fresh iteration.
 - Persists memory and progress between iterations.
 - Enforces checks before story completion.
 - Exposes live state and controls in a terminal UI.
+- Bootstraps new and existing repositories with mandatory onboarding before execution.
 
 ## Non-goals (v1)
 - Cloud/distributed execution.
 - Multi-operator concurrency in one runtime.
 - Web UI.
-- Automatic architecture generation from scratch prompts.
+- Automatic architecture generation from scratch prompts without user review.
 
 ## Users
 - Senior engineers running autonomous implementation loops.
@@ -33,6 +34,7 @@ Build an autonomous delivery orchestrator supporting Codex, Claude, Gemini, Open
 - No hidden state.
 - Pause/resume/stop must be instant and safe.
 - Minimal irreversible actions by default.
+- Onboarding is mandatory when runtime state is missing/incomplete.
 
 ## Success metrics
 - >= 90% of stories complete without manual intervention post-setup.
@@ -69,14 +71,13 @@ Acceptance:
 - Core loop is provider-agnostic.
 - Default provider is configurable and defaults to `codex`.
 - All seven providers (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi) integrate via CLI adapters:
-  - **Claude:** Uses `claude -p` (CLI mode)
-  - **Gemini:** Uses `gemini -p` (requires API key, not OAuth)
-  - **Codex:** Uses `codex "prompt"` or `codex exec`
-  - **OpenCode:** Uses `opencode -p` or `opencode "prompt"`
-  - **Copilot:** Uses `copilot -p` or `copilot --prompt`
-  - **Qwen Code:** Uses `qwen -p` (supports OAuth or API key)
-  - **Pi:** Uses `pi -p` (supports multiple providers)
-- Claude OAuth is not required by Daedalus runtime; auth/session handling is delegated to each CLI.
+  - Claude: `claude -p`
+  - Gemini: `gemini -p` (API key, not OAuth)
+  - Codex: `codex exec`
+  - OpenCode: `opencode -p`
+  - Copilot: `copilot -p` / `copilot --prompt`
+  - Qwen Code: `qwen -p`
+  - Pi: `pi -p`
 
 ### FR-004 Quality gates
 System must execute configured checks before completion.
@@ -107,15 +108,45 @@ System must persist all operational artifacts.
 
 Acceptance:
 - Files per PRD: `prd.md`, `prd.json`, `progress.md`, `agent.log`, `events.jsonl`.
-- Restart resumes from persisted state, no story loss.
+- Restart resumes from persisted state with no story loss.
 
 ### FR-008 Plugin mode
-System must run as standalone CLI and as Codex plugin integration.
+System must run as standalone CLI and as plugin integration.
 
 Acceptance:
 - Shared core engine, separate entry adapters.
 - Plugin path can invoke loop actions without TUI dependency.
 - Initial adapter command: `daedalus plugin run [name]`.
+
+### FR-009 First-run onboarding and project discovery
+System must run onboarding before planning/execution when `.daedalus/` is missing or onboarding is incomplete.
+
+Acceptance:
+- Onboarding is mandatory and resumable; interrupted setup resumes at first incomplete step.
+- Existing project mode is detected when current directory contains any file/folder other than `.daedalus/`.
+- Empty folder mode is detected when no file/folder exists other than `.daedalus/`.
+- Screen 1 asks whether to add `.daedalus/` to `.gitignore`, with `pros`, `cons`, and `use cases` for both choices.
+- Existing project mode prompts user for a plain-language project description.
+- Existing project mode runs an agent-driven read-only repository scan in background with visible progress UI (spinner/loader + status).
+- Scan output includes purpose, architecture, stack, key modules, test/lint commands, and active risks.
+- Scan failures show actionable errors and allow retry without losing prior onboarding inputs.
+
+### FR-010 Scan-seeded planning docs
+System must seed planning docs from onboarding outputs.
+
+Acceptance:
+- Empty folder mode captures JTBD from direct user input.
+- Existing project mode drafts JTBD from user description + scan summary, with user review/edit.
+- Existing project mode pre-fills Architecture & Design doc context from scan summary.
+- PRD context is seeded from approved JTBD + project summary context.
+
+### FR-011 Completion behavior defaults and flags
+Post-completion automation must be configured via defaults and flags, not onboarding screens.
+
+Acceptance:
+- Sensible defaults are disabled: push disabled, auto-PR disabled.
+- Configuration and CLI flags define/override completion behavior.
+- Onboarding does not block on post-completion automation choices.
 
 ## Non-functional requirements
 - Security: sanitize/validate inputs; avoid unsafe shell interpolation.
@@ -124,7 +155,7 @@ Acceptance:
 - Portability: Linux/macOS first; Windows later.
 - Observability: structured logs and deterministic event schema.
 - Extensibility: adding a new provider does not require core loop refactoring.
-- Configurability: retry and provider selection are configurable through TOML config and CLI flags.
+- Configurability: retry/provider/completion behavior are configurable through TOML config and CLI flags.
 
 ## Data model
 
@@ -148,20 +179,27 @@ Acceptance:
 - CLI skeleton: `new`, `list`, `status`, `validate`, `run`.
 - PRD service + schema validation.
 - Durable state layout.
+- Onboarding trigger/resume scaffold.
 
-### M2 Loop core
+### M2 Onboarding and context seeding
+- Git-ignore decision screen.
+- Existing-project detection + background scan + progress UI.
+- JTBD capture/review flow.
+- Seed JTBD/Architecture context docs.
+
+### M3 Loop core + TUI
 - Story picker and transition engine.
 - Codex provider adapter integration.
-- Event stream and structured logs.
-
-### M3 TUI
 - Dashboard + story list + logs + settings.
 - Runtime controls (start/pause/stop/resume).
-- Error and retry visibility.
 
 ### M4 Hardening
 - Quality gate pipeline.
 - Git commit + optional worktree mode.
+- TUI polish and hardening:
+- richer live event streaming
+- stronger pause/stop lifecycle controls
+- visual/interaction refinement
 - Tests and docs completion.
 
 ### M5 Multi-provider hardening
@@ -173,14 +211,14 @@ Acceptance:
 - Repo-specific check pipelines can be slow/flaky.
 - Ambiguous PRDs can cause poor story decomposition.
 - Multi-provider behavior drift (different tool/event semantics).
-- **Provider ToS compliance:** Google Gemini prohibits OAuth usage in third-party tools (bans reported). Always require API keys for Gemini.
-- **Anthropic Claude:** OAuth tokens from Free/Pro/Max plans not permitted for Agent SDK (though CLI mode is allowed).
+- Poor repository scan quality can seed incorrect planning context.
 
 ## Mitigations
 - Strict adapter boundary around provider integrations (SDK/CLI).
 - Configurable retries/timeouts/circuit-breakers.
 - PRD validation rules + clear authoring guidance.
 - Shared provider contract tests and normalized event golden tests.
+- Require explicit user review/edit for generated JTBD and seeded context.
 
 ## Todo list
 - [x] Define product scope.
@@ -190,3 +228,6 @@ Acceptance:
 - [x] Define milestones and risk controls.
 - [x] Finalize MVP command contract with exact CLI syntax.
 - [x] Start implementation scaffold.
+- [ ] Implement onboarding + existing-project discovery flow.
+- [ ] Complete Gemini provider module implementation.
+- [ ] Complete TUI polish and hardening scope.
