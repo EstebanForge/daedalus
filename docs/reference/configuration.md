@@ -25,9 +25,18 @@ default = "codex"
 [worktree]
 enabled = false
 
+[worktree]
+enabled = false
+
 [retry]
 max_retries = 3
 delays = ["0s", "5s", "15s"]
+
+[quality]
+commands = ["go test ./..."]
+
+[ui]
+theme = "auto"
 
 [quality]
 commands = ["go test ./..."]
@@ -84,6 +93,12 @@ provider = "anthropic"
   - v1 default: `false`.
   - When enabled, runs execute in `.daedalus/worktrees/<prd-name>/` and artifacts still persist under `.daedalus/prds/<prd-name>/`.
 
+### `[worktree]`
+- `enabled: bool`
+  - Enables worktree mode for `run`/TUI loop execution.
+  - v1 default: `false`.
+  - When enabled, runs execute in `.daedalus/worktrees/<prd-name>/` and artifacts still persist under `.daedalus/prds/<prd-name>/`.
+
 ### `[retry]`
 - `max_retries: int`
   - Retry attempts after initial failure.
@@ -92,6 +107,19 @@ provider = "anthropic"
   - Duration strings for retry wait schedule.
   - v1 default: `["0s", "5s", "15s"]`.
   - If retries exceed delay entries, use the last delay repeatedly.
+
+### `[quality]`
+- `commands: []string`
+  - Ordered quality gate commands executed after provider iteration and before story completion.
+  - Any non-zero exit code fails the run iteration.
+  - v1 default: `["go test ./..."]`.
+
+### `[ui]`
+- `theme: string`
+  - Controls TUI color palette selection.
+  - Valid values: `auto`, `dark`, `light`.
+  - v1 default: `"auto"`.
+  - `auto` attempts OS theme detection (macOS/Windows/Linux desktop hints). If detection is unavailable, Daedalus falls back to `dark`.
 
 ### `[quality]`
 - `commands: []string`
@@ -121,7 +149,7 @@ Provider-specific settings. Core reads only normalized fields and passes provide
 
 `[providers.claude]`:
 ||||||| Stash base
-`[providers.claude]`:
+Common normalized fields:
 =======
 Common normalized fields:
 >>>>>>> Stashed changes
@@ -222,6 +250,7 @@ Implemented global flags:
 >>>>>>> Stashed changes
 - `--provider <name>`
 - `--worktree` or `--worktree=<bool>`
+- `--worktree` or `--worktree=<bool>`
 - `--max-retries <n>`
 - `--retry-delays <csv-duration>`
 
@@ -236,16 +265,32 @@ Boolean values accepted for `--worktree` and `DAEDALUS_WORKTREE`:
 ## Environment overrides
 Implemented:
 - `DAEDALUS_CONFIG`
+Run command also supports:
+- `daedalus run [name] --worktree`
+- `daedalus run [name] --worktree=<bool>`
+
+Boolean values accepted for `--worktree` and `DAEDALUS_WORKTREE`:
+- true: `1`, `true`, `yes`, `on`
+- false: `0`, `false`, `no`, `off`
+
+## Environment overrides
+Implemented:
+- `DAEDALUS_CONFIG`
 - `DAEDALUS_PROVIDER`
+- `DAEDALUS_WORKTREE`
 - `DAEDALUS_WORKTREE`
 - `DAEDALUS_MAX_RETRIES`
 - `DAEDALUS_RETRY_DELAYS`
 - `DAEDALUS_THEME` (`dark` or `light`; overrides `ui.theme`)
+- `DAEDALUS_THEME` (`dark` or `light`; overrides `ui.theme`)
 
 ## Validation rules
+- `provider.default` must not be empty.
 - `provider.default` must not be empty.
 - `retry.max_retries` must be `>= 0`.
 - `retry.delays` values must parse as valid durations.
 - Empty `retry.delays` with `max_retries > 0` is invalid.
+- `quality.commands` must contain at least one non-empty command.
+- `ui.theme` must be one of `auto`, `dark`, or `light`.
 - `quality.commands` must contain at least one non-empty command.
 - `ui.theme` must be one of `auto`, `dark`, or `light`.
