@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the recommended workflow forDaedalus — from initial concept through implementation. It is designed to provide clear context for both humans and LLM agents collaborating on the project.
+This document defines the recommended workflow for Daedalus — from initial concept through implementation. It is designed to provide clear context for both humans and LLM agents collaborating on the project.
 
 ---
 
@@ -14,7 +14,7 @@ JTBD → PRD → Architecture & Design → Implementation
 
 ### 1. Jobs-to-be-Done (JTBD)
 
-**Purpose:** Define the problem. Understand what job the product is hired to do.
+**Purpose:** Define the problem. Understand what job the product is "hired" to do.
 
 **Output:** A single statement in the format:
 ```
@@ -192,4 +192,4 @@ When working on Daedalus:
 
 ---
 
-*This workflow is designed for Daedalus but can be adapted for other projects.*
+*This workflow is designed for Daedalus.*
