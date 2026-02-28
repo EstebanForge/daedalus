@@ -374,6 +374,8 @@ func New(version string) App {
 }
 
 func (a App) Run(ctx context.Context, args []string) error {
+	defer providers.CloseAllSessions()
+
 	global, remainingArgs, err := parseGlobalOptions(args)
 	if err != nil {
 		return err

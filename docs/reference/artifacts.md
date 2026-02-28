@@ -8,6 +8,9 @@ Current scaffold runtime artifacts per PRD:
 Workflow-extension onboarding artifacts:
 - `.daedalus/onboarding/state.json`
 
+ACP runtime cache:
+- `.daedalus/acp-sessions.json`
+
 ## Files
 
 ### Core PRD runtime files (implemented)
@@ -22,6 +25,17 @@ Workflow-extension onboarding artifacts:
 - `.daedalus/prds/<name>/project-summary.md`
 - `.daedalus/prds/<name>/jtbd.md`
 - `.daedalus/prds/<name>/architecture-design.md`
+
+### ACP session cache (implemented)
+- `.daedalus/acp-sessions.json`
+
+Purpose:
+- Zero-config best-effort session resume across process restarts.
+- Keyed by provider + working directory.
+
+Behavior:
+- Cache is advisory; providers may reject stale session IDs.
+- On resume failure, runtime falls back to creating a fresh ACP session.
 
 All three markdown files above are generated from canonical templates embedded in
 `internal/templates/`. The templates define fixed section headings that must be

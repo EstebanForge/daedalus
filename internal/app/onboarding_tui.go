@@ -29,15 +29,15 @@ type onboardingTickMsg time.Time
 
 // onboardingModel is the BubbleTea model for the 4-step onboarding flow.
 type onboardingModel struct {
-	ctx        context.Context
-	app        App
-	store      prd.Store
-	cfg        config.Config
-	baseDir    string
-	mgr        *onboarding.Manager
-	state      onboarding.State
-	step       string // current step name
-	mode       onboarding.ProjectMode
+	ctx     context.Context
+	app     App
+	store   prd.Store
+	cfg     config.Config
+	baseDir string
+	mgr     *onboarding.Manager
+	state   onboarding.State
+	step    string // current step name
+	mode    onboarding.ProjectMode
 
 	// step-specific input state
 	cursor       int    // 0=yes, 1=no for git_ignore
@@ -380,7 +380,7 @@ func (m onboardingModel) View() string {
 
 	// Header
 	n := stepNumber(m.step)
-	sb.WriteString(fmt.Sprintf("Daedalus Setup (step %d/4)\n", n))
+	fmt.Fprintf(&sb, "Daedalus Setup (step %d/4)\n", n)
 	sb.WriteString(strings.Repeat("─", 40) + "\n\n")
 
 	// Body
@@ -390,9 +390,9 @@ func (m onboardingModel) View() string {
 		choices := []string{"Yes", "No"}
 		for i, choice := range choices {
 			if i == m.cursor {
-				sb.WriteString(fmt.Sprintf("  > %s\n", choice))
+				fmt.Fprintf(&sb, "  > %s\n", choice)
 			} else {
-				sb.WriteString(fmt.Sprintf("    %s\n", choice))
+				fmt.Fprintf(&sb, "    %s\n", choice)
 			}
 		}
 		sb.WriteString("\n[↑/↓] select  [Enter] confirm  [q] quit\n")
@@ -405,10 +405,10 @@ func (m onboardingModel) View() string {
 			sb.WriteString("[Enter] submit  [q] quit\n")
 		case "running":
 			frame := onboardingSpinnerFrames[m.spinnerFrame%len(onboardingSpinnerFrames)]
-			sb.WriteString(fmt.Sprintf("Scanning repository... %s\n\n", frame))
+			fmt.Fprintf(&sb, "Scanning repository... %s\n\n", frame)
 			sb.WriteString("[q] quit\n")
 		case "error":
-			sb.WriteString(fmt.Sprintf("Scan failed: %s\n\n", m.scanErr))
+			fmt.Fprintf(&sb, "Scan failed: %s\n\n", m.scanErr)
 			sb.WriteString("[Enter/r] retry  [s] skip  [q] quit\n")
 		}
 

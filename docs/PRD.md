@@ -10,7 +10,7 @@ Codex-native autonomous delivery loop with onboarding-first setup, project disco
 Large implementation sessions degrade as context grows. Teams lose determinism, quality drifts, and commit history becomes noisy. We need a repeatable story-at-a-time loop with explicit operator control.
 
 ## Goal
-Build an autonomous delivery orchestrator supporting Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, and Pi CLI through their non-interactive CLI modes.
+Build an autonomous delivery orchestrator supporting Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, and Pi through ACP transport.
 - Executes one user story per fresh iteration.
 - Persists memory and progress between iterations.
 - Enforces checks before story completion.
@@ -65,7 +65,7 @@ Acceptance:
 System must run agent providers through a stable adapter boundary using the Agent Client Protocol (ACP).
 
 Acceptance:
-- Each iteration starts a provider session via ACP.
+- Each iteration uses an ACP session (resume when available, otherwise create new).
 - Adapter streams normalized events to loop and TUI.
 - Adapter errors are typed and retry-aware.
 - Core loop is provider-agnostic.
@@ -209,6 +209,13 @@ Acceptance:
 - [x] Multi-provider contract conformance and regression hardening.
 - [x] All 7 providers implemented: codex, claude, gemini, opencode, copilot, qwen, pi.
 - [x] Shared contract test suite covering all providers.
+
+### M6 ACP migration (in progress)
+- [x] ACP provider path added and wired in registry.
+- [x] ACP runtime hardening (polling, streaming, cancellation).
+- [ ] ACP-first integration coverage across native and adapter-backed providers.
+- [x] Legacy CLI provider cleanup.
+- [x] ACP-first contract coverage and event mapping golden tests.
 
 ## Risks
 - Provider API/CLI and policy changes.

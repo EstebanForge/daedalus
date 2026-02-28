@@ -1,183 +1,146 @@
 # ACP Migration Plan
 
-> **Status:** Planning  
-> **Created:** 2026-02-26  
+> **Status:** In Progress
+> **Created:** 2026-02-26
+> **Last Updated:** 2026-02-28
 > **Target:** Daedalus v2.0
 
 ## Summary
 
-Migrate all agent providers from CLI-based invocation to the Agent Client Protocol (ACP). This removes fragmented provider-specific CLI interfaces and replaces them with a standardized JSON-RPC interface.
-
-## Problem Statement
-
-### Current State
-
-Each provider uses a different CLI invocation pattern:
-
-| Provider | Invocation | Interface |
-|----------|-----------|-----------|
-| Codex | `codex exec --sandbox <policy> --skip-git-repo-check --output-last-message <path> <prompt>` | CLI args + temp file |
-| OpenCode | `opencode -p <prompt>` | CLI args |
-| Claude | `claude -p <prompt>` | CLI args |
-| Gemini CLI | `gemini -p <prompt>` | CLI args |
-| Qwen | `qwen coder -p <prompt>` | CLI args |
-| Copilot | `copilot --prompt "<prompt>"` | CLI args |
-| Pi | `pi agent -p <prompt>` | CLI args |
-
-Issues with current approach:
-1. **Fragmented interfaces** — each provider has different flags, argument order, output formats
-2. **No session state** — each invocation starts fresh; no conversation continuity
-3. **Fragile parsing** — stdout/stderr line-by-line parsing is brittle
-4. **Hard to maintain** — provider CLI changes require updates to each adapter
-5. **No standardized error handling** — each provider maps errors differently
-
-### Why ACP?
-
-The Agent Client Protocol (ACP) provides:
-- **Standardized JSON-RPC interface** — same messages for all agents
-- **Session management** — resume conversations, maintain context across iterations
-- **Structured events** — no fragile stdout parsing
-- **Rich prompts** — structured content blocks, not just CLI args
-- **Future-proof** — 25+ agents support ACP (OpenCode, Claude via adapter, Gemini CLI, Qwen, Copilot, etc.)
+Migrate all agent providers from provider-specific CLI argument invocation to Agent Client Protocol (ACP) JSON-RPC transport.
 
 ## Goals
 
-1. **Unified interface** — one provider implementation handles all ACP-compatible agents
-2. **Session persistence** — maintain agent conversation across story iterations
-3. **Structured communication** — JSON-RPC instead of CLI argument parsing
-4. **Provider-agnostic core** — ACP is the abstraction; agent-specific details stay in config
+1. One provider runtime path for all supported providers.
+2. Structured ACP event streaming instead of brittle text parsing.
+3. Provider-agnostic loop behavior with typed, retry-aware errors.
+4. Zero-config session continuity with best-effort resume across iterations and process restarts.
 
 ## Non-Goals
 
-- Support non-ACP agents (CLI fallback)
-- Backward compatibility with CLI transport
-- Supporting providers that don't have ACP implementations
+- Re-introducing CLI fallback transport.
+- Maintaining provider-specific core logic branches.
+- Supporting non-ACP-only providers.
+
+## Current State
+
+Done:
+- Registry routes all provider keys to ACP provider construction.
+- ACP JSON-RPC types and initialize/session lifecycle scaffolding exist.
+- Core loop and onboarding scan paths are already wired through provider abstraction.
+
+In progress:
+- Real-provider ACP integration execution and provider-specific validation.
+- Migration closeout after provider-family fixture integrations.
+
+Pending:
+- Fixture integration runs for provider families (native + adapter-backed).
 
 ## Architecture
 
-### Provider Contract (Unchanged)
+Provider contract remains:
 
-```
+```text
 RunIteration(ctx, request) -> (<-chan Event, IterationResult, error)
 Capabilities() -> Capabilities
 Name() -> string
 ```
 
-### New Transport Layer
+ACP transport responsibilities:
 
-```
+```text
 ACP Provider
-├── Session Manager (package-level)
-│   ├── process lifecycle
-│   ├── session state (agent session ID)
-│   └── message counter
-├── JSON-RPC Handler
-│   ├── initialize
-│   ├── session/new
-│   ├── session/prompt
-│   └── session/cancel
-└── Event Normalizer
-    ├── session/update -> EventAssistantText
-    ├── error -> EventError
-    └── tool_* -> EventTool*
+|- Process/session manager
+|  |- subprocess lifecycle
+|  |- ACP session id tracking
+|  |- JSON-RPC message id tracking
+|- JSON-RPC handler
+|  |- initialize
+|  |- session/resume (best-effort)
+|  |- session/new (fallback)
+|  |- session/prompt
+|  |- session/cancel
+'- Event normalization
+   |- session/update -> EventAssistantText / EventTool*
+   '- error -> EventError
 ```
 
-### Session Lifecycle
+## Session Lifecycle
 
-```
-1. Start agent process: <agent> acp
-2. Initialize: {method: "initialize", params: {protocolVersion, clientCapabilities, clientInfo}}
-3. Create session: {method: "session/new", params: {cwd, mcpServers}}
-4. Send prompt: {method: "session/prompt", params: {sessionId, prompt: [{type: "text", text}]}}
-5. Collect responses via session/update notifications
-6. On completion: session ends, process terminates
-```
-
-### Configuration
-
-```toml
-[providers.codex]
-enabled = true
-model = "default"
-# ACP-specific (future)
-# transport = "acp"  # implicit, CLI no longer supported
-
-[providers.opencode]
-enabled = true
-model = "default"
+```text
+1. Start agent ACP process (<binary> acp or adapter command)
+2. Send initialize
+3. Attempt session/resume from persisted cache (provider + workdir + command)
+4. Fallback to session/new when resume is unavailable or rejected
+5. Send session/prompt
+6. Consume streaming notifications and final response
+7. Cancel/end on completion or context cancellation
 ```
 
 ## Implementation Plan
 
-### Phase 1: ACP Provider Implementation (DONE)
+### Phase 1: ACP Provider Foundation
 
 - [x] Create `internal/providers/acp.go`
-- [x] Implement session management (package-level state)
-- [x] Implement JSON-RPC message types
-- [x] Implement initialize/session_new/session_prompt flow
-- [x] Update registry to route all providers through ACP
-- [x] Build and vet passes
+- [x] Implement ACP JSON-RPC message model
+- [x] Wire registry to ACP provider for all provider keys
 
-### Phase 2: Polling Implementation
+### Phase 2: Transport Runtime Hardening
 
-- [ ] Implement stdout polling for JSON-RPC responses
-- [ ] Handle session/update notifications (streaming)
-- [ ] Handle tool call events
-- [ ] Implement proper cancellation
+- [x] Implement persistent stdin/stdout I/O for JSON-RPC
+- [x] Handle `session/update` notifications for streaming text
+- [x] Normalize tool lifecycle events when provided by ACP updates
+- [x] Implement reliable cancellation (`session/cancel` + process handling)
 
-### Phase 3: Session Reuse (Future)
+### Phase 3: Session Reuse
 
-- [ ] Persist session ID across iterations
-- [ ] Resume session instead of creating new one
-- [ ] Handle session expiration/timeout
+- [x] Define in-process session reuse strategy (provider + workdir scope)
+- [x] Persist/recover session identity with zero-config cache (`.daedalus/acp-sessions.json`)
+- [x] Handle stale/expired session recovery
 
 ### Phase 4: Testing
 
-- [ ] Test with OpenCode (native ACP support)
-- [ ] Test with Codex (requires `codex-acp` adapter)
-- [ ] Test with Gemini CLI
-- [ ] Integration tests per provider
-- [ ] Error handling tests
+- [x] ACP provider contract tests (active runtime path)
+- [x] Event mapping golden tests
+- [ ] Integration runs for native ACP providers (OpenCode, Gemini, Qwen)
+- [ ] Adapter-backed integration runs (Codex, Claude, Pi)
+- [x] Add env-gated integration test scaffolding for real providers
+- [x] Error mapping and cancellation tests
 
-### Phase 5: Cleanup
+### Phase 5: Cleanup and Closeout
 
-- [ ] Remove old CLI-based provider files (codex.go, opencode.go, etc.)
-- [ ] Update ARCHITECTURE.md
-- [ ] Update provider documentation
-- [ ] Update AGENTS.md
+- [x] Remove deprecated CLI provider implementations
+- [x] Confirm docs/code parity (`ARCHITECTURE`, provider/config refs, AGENTS)
+- [x] Final migration validation: `golangci-lint`, `go vet`, `go test`
 
 ## Provider ACP Support Matrix
 
 | Provider | Native ACP | Adapter Required |
 |----------|-----------|------------------|
-| OpenCode | ✅ | No |
-| Gemini CLI | ✅ | No |
-| Claude Agent | ❌ | Yes (Zed adapter) |
-| Codex CLI | ❌ | Yes (codex-acp) |
-| Copilot | ❌ | Unknown |
-| Qwen Code | ✅ | No |
-| Pi | ❌ | Yes (pi-acp) |
-
-**Note:** Provider support is evolving. Check https://agentclientprotocol.com/get-started/agents.md for current list.
+| OpenCode | Yes | No |
+| Gemini CLI | Yes | No |
+| Qwen Code | Yes | No |
+| Copilot | Yes (preview) | No |
+| Claude Agent | No | Yes (Zed adapter) |
+| Codex CLI | No | Yes (`codex-acp`) |
+| Pi | No | Yes (`pi-acp`) |
 
 ## Risks
 
-1. **Adapter dependency** — Some agents require adapters (Codex, Claude) which adds maintenance surface
-2. **Protocol changes** — ACP is evolving; must track version changes
-3. **Process lifecycle** — Session reuse requires careful error handling
-4. **Testing complexity** — Each provider + adapter combination needs verification
+1. Adapter lifecycle and compatibility drift.
+2. ACP protocol/server behavior differences across providers.
+3. Session/process leaks under retry/cancellation pressure.
+4. Insufficient coverage of the active ACP runtime path.
 
 ## Open Questions
 
-1. **Session reuse strategy?** — Keep session alive between stories or create fresh each time?
-2. **MC servers?** — Should Daedalus expose MCP servers to agents via ACP?
-3. **Tool call handling?** — How to surface tool calls in TUI/events?
-4. **Provider config migration?** — How to handle provider-specific ACP vs CLI-only config?
+1. MCP server exposure policy for ACP sessions.
+2. Required tool event normalization contract in TUI/logs.
+3. Provider-specific ACP command override shape in config.
 
 ## References
 
 - ACP Specification: https://agentclientprotocol.com/
 - ACP Agents List: https://agentclientprotocol.com/get-started/agents.md
-- ACP Libraries: https://agentclientprotocol.com/libraries/
 - OpenCode ACP: https://github.com/sst/opencode
 - Codex ACP Adapter: https://github.com/zed-industries/codex-acp

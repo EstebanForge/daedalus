@@ -22,7 +22,7 @@ This file is the operating guide for agents working in the Daedalus repository.
 - `internal/onboarding`: onboarding state machine and manager
 - `internal/prd`: PRD model, validation, storage
 - `internal/loop`: story execution loop + retry policy
-- `internal/providers`: provider contract, errors, registry, all 7 provider modules
+- `internal/providers`: ACP provider runtime, provider contract, errors, and registry for all 7 provider keys
 - `internal/quality`: quality gate runner (executes configured check commands)
 - `internal/git`: story-scoped commit service
 - `internal/worktree`: git worktree lifecycle manager

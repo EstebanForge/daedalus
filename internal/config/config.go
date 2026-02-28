@@ -56,6 +56,7 @@ type GenericProviderConfig struct {
 	Model          string `toml:"model"`
 	ApprovalPolicy string `toml:"approval_policy"`
 	SandboxPolicy  string `toml:"sandbox_policy"`
+	ACPCommand     string `toml:"acp_command"`
 }
 
 func Defaults() Config {

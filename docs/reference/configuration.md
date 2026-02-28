@@ -40,6 +40,7 @@ enabled = true
 model = "default"
 approval_policy = "on-failure"
 sandbox_policy = "workspace-write"
+acp_command = "codex-acp"
 
 [providers.claude]
 enabled = false
@@ -117,6 +118,7 @@ Common fields:
 - `model: string`
 - `approval_policy: string` — handled via ACP protocol when supported
 - `sandbox_policy: string` — handled via ACP protocol when supported
+- `acp_command: string` — optional ACP executable/command override per provider
 
 **Note:** With ACP transport, approval and sandbox policies are handled at the protocol level. Some providers may not support all policy modes. Check `docs/reference/providers.md` for provider-specific capabilities.
 
@@ -125,11 +127,16 @@ Defaults:
 - `providers.codex.model = "default"`
 - `providers.codex.approval_policy = "on-failure"`
 - `providers.codex.sandbox_policy = "workspace-write"`
+- `providers.codex.acp_command = ""` (runtime provider default applies)
 - All other providers: `enabled = false`
 
 Policy value notes:
 - `approval_policy` values used by scaffold/provider docs: `on-failure`, `on-request`, `never`
 - `sandbox_policy` value used by scaffold/provider docs: `workspace-write`
+
+ACP command notes:
+- Empty `acp_command` uses provider runtime defaults.
+- Set this for any provider when the command/binary differs from runtime defaults.
 
 ## Planned fields (not implemented)
 
@@ -185,6 +192,7 @@ Boolean values for `--worktree`:
 - Empty `retry.delays` with `max_retries > 0` is invalid.
 - `quality.commands` must contain at least one non-empty command.
 - `ui.theme` must be one of `auto`, `dark`, `light`.
+- Selected provider key must resolve to a registered and enabled provider.
 
 ## Validation rules (planned)
 - `completion.auto_pr_on_complete=true` should require `completion.push_on_complete=true`.

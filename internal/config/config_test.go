@@ -109,3 +109,22 @@ func TestLoadAppliesFallbackForUITheme(t *testing.T) {
 		t.Fatalf("expected fallback ui.theme auto, got %q", cfg.UI.Theme)
 	}
 }
+
+func TestLoadReadsProviderACPCommand(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := "[provider]\ndefault = \"codex\"\n\n[retry]\nmax_retries = 1\ndelays = [\"0s\"]\n\n[quality]\ncommands = [\"go test ./...\"]\n\n[providers.codex]\nenabled = true\nacp_command = \"codex-acp\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Providers.Codex.ACPCommand != "codex-acp" {
+		t.Fatalf("expected acp command to be loaded, got %q", cfg.Providers.Codex.ACPCommand)
+	}
+}

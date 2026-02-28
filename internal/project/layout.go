@@ -45,6 +45,7 @@ func WorktreePath(baseDir, name string) string {
 }
 
 const OnboardingDirectory = "onboarding"
+const ACPSessionsFile = "acp-sessions.json"
 
 func OnboardingPath(workDir string) string {
 	return filepath.Join(workDir, DirectoryName, OnboardingDirectory)
@@ -52,6 +53,10 @@ func OnboardingPath(workDir string) string {
 
 func OnboardingStatePath(workDir string) string {
 	return filepath.Join(OnboardingPath(workDir), "state.json")
+}
+
+func ACPSessionsPath(workDir string) string {
+	return filepath.Join(workDir, DirectoryName, ACPSessionsFile)
 }
 
 func PRDProjectSummaryPath(workDir, name string) string {

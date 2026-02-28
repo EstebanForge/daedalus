@@ -460,6 +460,17 @@ func buildContextFiles(artifactDir, workDir, prdName string) []string {
 		project.PRDJSONPath(artifactDir, prdName),
 		project.PRDProgressPath(artifactDir, prdName),
 	}
+
+	for _, optionalArtifact := range []string{
+		project.PRDProjectSummaryPath(artifactDir, prdName),
+		project.PRDJTBDPath(artifactDir, prdName),
+		project.PRDArchitecturePath(artifactDir, prdName),
+	} {
+		if _, err := os.Stat(optionalArtifact); err == nil {
+			candidates = append(candidates, optionalArtifact)
+		}
+	}
+
 	for _, optional := range []string{"AGENTS.md", "README.md"} {
 		optionalPath := filepath.Join(workDir, optional)
 		if _, err := os.Stat(optionalPath); err == nil {

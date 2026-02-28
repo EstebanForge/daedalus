@@ -4,7 +4,7 @@
 Three-layer local-first architecture:
 - Interface layer: CLI + TUI + plugin entry.
 - Core layer: onboarding manager, PRD service, loop manager, quality and git services.
-- Adapter layer: provider modules (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi CLI).
+- Adapter layer: ACP provider modules (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi).
 
 ## Directory layout
 Global config (Linux/XDG):
@@ -13,6 +13,7 @@ Global config (Linux/XDG):
 
 Project runtime state:
 - `.daedalus/`
+- `.daedalus/acp-sessions.json` (ACP session cache for zero-config cross-process resume attempts)
 - `onboarding/state.json` (onboarding progress + completion marker)
 - `prds/<name>/prd.md`
 - `prds/<name>/prd.json`
@@ -267,16 +268,16 @@ Worktree lifecycle and safety rules are specified in:
 - [x] Phase 3: provider contract + registry + quality gates + TUI runtime controls/views.
 - [x] Phase 4: worktree mode + TUI polish/hardening (richer event streaming, stronger pause/stop lifecycle controls, visual/interaction refinement) + docs finalization.
 - [x] Phase 5: remaining provider implementations (including Gemini), multi-provider hardening, and provider-specific optimizations.
-- [x] Phase 6: ACP migration (unified provider transport via Agent Client Protocol).
+- [ ] Phase 6: ACP migration (unified provider transport via Agent Client Protocol).
 
 ## Provider integration notes
 - All providers use ACP (Agent Client Protocol) for communication.
 - ACP provides standardized JSON-RPC interface across all agents.
-- Session management allows conversation continuity across iterations.
+- Session management supports in-process reuse and zero-config best-effort resume across restarts.
 - See `docs/ACP-migration.md` for detailed migration plan.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.
-- All providers pass the shared contract test suite in `internal/providers/contract_test.go`.
+- ACP runtime hardening and ACP-first contract coverage are complete; full provider-family integration runs remain in progress.
 
 ### ACP Provider Support Matrix
 

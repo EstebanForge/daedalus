@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/EstebanForge/daedalus/internal/config"
@@ -27,13 +28,37 @@ func NewRegistry() Registry {
 func (r Registry) Resolve(name string, cfg config.Config) (Provider, error) {
 	key := strings.ToLower(strings.TrimSpace(name))
 	if key == "" {
-		key = cfg.Provider.Default
+		key = strings.ToLower(strings.TrimSpace(cfg.Provider.Default))
 	}
 
 	builder, exists := r.builders[key]
 	if !exists {
 		return nil, NewUnknownProviderError(key)
 	}
+	if !providerEnabled(cfg, key) {
+		return nil, NewConfigurationError(fmt.Sprintf("provider %q is disabled in config", key), nil)
+	}
 
 	return builder(cfg), nil
+}
+
+func providerEnabled(cfg config.Config, key string) bool {
+	switch key {
+	case "codex":
+		return cfg.Providers.Codex.Enabled
+	case "claude":
+		return cfg.Providers.Claude.Enabled
+	case "gemini":
+		return cfg.Providers.Gemini.Enabled
+	case "opencode":
+		return cfg.Providers.OpenCode.Enabled
+	case "copilot":
+		return cfg.Providers.Copilot.Enabled
+	case "qwen":
+		return cfg.Providers.Qwen.Enabled
+	case "pi":
+		return cfg.Providers.Pi.Enabled
+	default:
+		return false
+	}
 }
