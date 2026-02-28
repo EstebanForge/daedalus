@@ -56,7 +56,7 @@ Startup contract:
 
 Existing project scan contract:
 - Trigger: any file/folder besides `.daedalus/` in current working directory.
-- Execution: agent-driven scan via Agents CLI prompts.
+- Execution: agent-driven scan via ACP (Agent Client Protocol).
 - Mode: read-only.
 - UX: background execution with loader/spinner and status text.
 - Failure: actionable error + retry without discarding previous onboarding answers.
@@ -267,16 +267,28 @@ Worktree lifecycle and safety rules are specified in:
 - [x] Phase 3: provider contract + registry + quality gates + TUI runtime controls/views.
 - [x] Phase 4: worktree mode + TUI polish/hardening (richer event streaming, stronger pause/stop lifecycle controls, visual/interaction refinement) + docs finalization.
 - [x] Phase 5: remaining provider implementations (including Gemini), multi-provider hardening, and provider-specific optimizations.
+- [x] Phase 6: ACP migration (unified provider transport via Agent Client Protocol).
 
 ## Provider integration notes
-- All providers use CLI-based non-interactive execution (`-p` / `--prompt` patterns).
-- All 7 providers are fully implemented: codex, claude, gemini, opencode, copilot, qwen, pi.
-- Codex and Claude support sandbox and approval policy configuration.
-- Gemini requires API key authentication (not OAuth).
-- Copilot uses `--prompt` flag instead of `-p`.
+- All providers use ACP (Agent Client Protocol) for communication.
+- ACP provides standardized JSON-RPC interface across all agents.
+- Session management allows conversation continuity across iterations.
+- See `docs/ACP-migration.md` for detailed migration plan.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.
 - All providers pass the shared contract test suite in `internal/providers/contract_test.go`.
+
+### ACP Provider Support Matrix
+
+| Provider | Native ACP | Adapter Required |
+|----------|-----------|------------------|
+| OpenCode | ✅ | No |
+| Gemini CLI | ✅ | No |
+| Qwen Code | ✅ | No |
+| Copilot | ✅ | No (preview) |
+| Claude | ❌ | Yes (Zed adapter) |
+| Codex | ❌ | Yes (codex-acp) |
+| Pi | ❌ | Yes (pi-acp) |
 
 ## Testing strategy
 - Unit: onboarding transitions, PRD transitions, selection logic, retry policy.

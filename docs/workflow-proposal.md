@@ -46,12 +46,14 @@ JTBD → PRD → Architecture & Design → ADRs → Implementation
 
 #### 1.2 Existing Project Discovery (existing project mode only)
 - Prompt user for a short plain-language description of the project.
-- Run an agent-driven repository scan in the background using Agents CLI prompts.
+- Run an agent-driven repository scan in the background using ACP-enabled agent prompts.
 - Scan behavior requirements:
 - Read-only analysis only (no repository mutation).
 - Show clear UI progress while running (spinner/loader + status text).
 - Return a structured summary covering purpose, architecture, stack, key modules, test/lint commands, and active risks.
 - If scan fails, show actionable error and allow retry without losing prior onboarding inputs.
+
+**Note:** Repository scans use the Agent Client Protocol (ACP) for standardized communication with the agent. See `docs/ACP-migration.md`.
 
 #### 1.3 JTBD Capture
 - Empty folder mode: user writes JTBD in a text area.

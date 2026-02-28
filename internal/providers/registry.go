@@ -13,13 +13,13 @@ type Registry struct {
 func NewRegistry() Registry {
 	return Registry{
 		builders: map[string]func(config.Config) Provider{
-			"codex":    newCodexProvider,
-			"claude":   newClaudeProvider,
-			"gemini":   newGeminiProvider,
-			"opencode": newOpencodeProvider,
-			"copilot":  newCopilotProvider,
-			"qwen":     newQwenProvider,
-			"pi":       newPiProvider,
+			"codex":    func(cfg config.Config) Provider { return newACPProvider(cfg, "codex") },
+			"claude":   func(cfg config.Config) Provider { return newACPProvider(cfg, "claude") },
+			"gemini":   func(cfg config.Config) Provider { return newACPProvider(cfg, "gemini") },
+			"opencode": func(cfg config.Config) Provider { return newACPProvider(cfg, "opencode") },
+			"copilot":  func(cfg config.Config) Provider { return newACPProvider(cfg, "copilot") },
+			"qwen":     func(cfg config.Config) Provider { return newACPProvider(cfg, "qwen") },
+			"pi":       func(cfg config.Config) Provider { return newACPProvider(cfg, "pi") },
 		},
 	}
 }

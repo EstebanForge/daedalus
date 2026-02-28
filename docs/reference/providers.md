@@ -1,25 +1,28 @@
 # Daedalus Provider Contract v1
 
 ## Goal
-Keep core runtime provider-agnostic so Codex, Claude, Gemini, OpenCode, and Copilot CLI integrate as modules without refactoring loop/business logic.
+Keep core runtime provider-agnostic so Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, and Pi CLI integrate as modules without refactoring loop/business logic.
+
+## Transport
+All providers use the **Agent Client Protocol (ACP)** for communication. ACP provides a standardized JSON-RPC interface for agent execution, session management, and structured event streaming.
+
+See `docs/ACP-migration.md` for detailed migration information.
 
 ## Provider keys
-- `codex` (v1 target)
-- `claude` (CLI-backed)
-- `gemini` (CLI-backed)
-- `opencode` (CLI-backed)
-- `copilot` (CLI-backed)
-- `qwen` (CLI-backed)
-- `pi` (CLI-backed)
-
-All providers use the same non-interactive CLI pattern (`-p` / `--print`) for execution.
+- `codex` — requires `codex-acp` adapter (see below)
+- `claude` — requires Claude Agent SDK ACP adapter
+- `gemini` — native ACP support
+- `opencode` — native ACP support
+- `copilot` — ACP support in public preview
+- `qwen` — native ACP support
+- `pi` — requires `pi-acp` adapter
 
 ## Required interface
 - `Name() string`
 - `Capabilities() ProviderCapabilities`
-- `RunIteration(ctx, request) -> (<-chan Event, IterationResult, error)`
+- `RunIteration(ctx, request) -> (<-chan, error)`
 
-`RunIteration` semantics (v1):
+` Event, IterationResultRunIteration` semantics (v1):
 - `error` is for pre-start failures only (invalid request/config, executable missing, launch failure).
 - On pre-start failure, returned event channel must be `nil` and `IterationResult.success` must be `false`.
 - In-flight execution failures are emitted as normalized `error` events.
@@ -29,12 +32,25 @@ All providers use the same non-interactive CLI pattern (`-p` / `--print`) for ex
 - On `ctx` cancellation, provider should stop quickly, emit a terminal `error` event with cancellation context when possible, then close the channel.
 - Core consumers must drain events until channel close before evaluating final iteration success/failure.
 
+## Session Management
+ACP enables session persistence across iterations. Each provider maintains:
+- **Process lifecycle** — agent subprocess management
+- **Session state** — ACP session ID for the agent conversation
+- **Message counter** — JSON-RPC ID tracking
+
+Session behavior:
+1. Provider starts agent process with `acp` subcommand
+2. Initializes ACP connection via `initialize` method
+3. Creates session via `session/new` method
+4. Sends prompts via `session/prompt` method
+5. Collects responses via `session/update` notifications
+
 ## Iteration request
 - `workDir: string`
 - `prompt: string`
 - `contextFiles: []string`
-- `approvalPolicy: string`
-- `sandboxPolicy: string`
+- `approvalPolicy: string` — handled via ACP protocol when supported
+- `sandboxPolicy: string` — handled via ACP protocol when supported
 - `model: string`
 - `metadata: map[string]string` (optional provider hints)
 
@@ -119,49 +135,57 @@ Retry guidance:
 - New fields must be additive and optional.
 - Breaking contract changes require major version bump and migration notes.
 
-## Provider notes
+## Provider ACP Support
 
-### Claude
-- Integration uses the `claude` CLI (`-p/--print` mode) as the execution surface.
-- Daedalus does not depend on Claude SDK usage for agent execution.
-- Daedalus does not require Claude OAuth integration; Claude authentication is handled by the local CLI environment.
-- **ToS Note:** OAuth tokens from Free/Pro/Max plans are NOT permitted for Agent SDK use. However, using `claude -p` (CLI mode) is allowed as it uses OAuth for Claude Code itself.
+| Provider | Native ACP | Adapter Required | Notes |
+|----------|-----------|------------------|-------|
+| OpenCode | ✅ | No | Native ACP support |
+| Gemini CLI | ✅ | No | Native ACP support |
+| Qwen Code | ✅ | No | Native ACP support |
+| Claude Agent | ❌ | Yes | Requires [Zed adapter](https://github.com/zed-industries/claude-agent-acp) |
+| Codex CLI | ❌ | Yes | Requires [codex-acp](https://github.com/zed-industries/codex-acp) |
+| Copilot | ✅ | No | ACP in public preview |
+| Pi | ❌ | Yes | Requires [pi-acp](https://github.com/svkozak/pi-acp) |
 
-### Gemini
-- Integration uses the `gemini` CLI (`-p/--print` mode) as the execution surface.
-- Requires API key authentication (OAuth via Antigravity is NOT supported).
-- **ToS Warning:** Using OAuth tokens from Google AI Ultra/Pro with third-party tools violates Google's ToS and may result in account bans. Always use API keys from Google Cloud Console.
+**Note:** ACP support evolves rapidly. Check https://agentclientprotocol.com/get-started/agents.md for current list.
 
-### Codex
-- Integration uses `codex "prompt"` or `codex exec` for non-interactive execution.
-- Uses OpenAI API under the hood (subscription-based).
-- No additional authentication notes.
+## Provider Configuration Notes
 
 ### OpenCode
-- Integration uses `opencode -p "prompt"` or `opencode "prompt"` for non-interactive execution.
-- Supports custom model configuration via `--model` flag.
-- Uses API key authentication.
+- Binary: `opencode`
+- Command: `opencode acp`
+- Authentication: API key via environment or config
+- Model: configurable via `--model` flag in session
 
-### Copilot
-- Integration uses `copilot -p "prompt"` or `copilot --prompt "prompt"` for non-interactive execution.
-- Requires GitHub authentication (via `gh auth login`).
-- No additional authentication notes.
+### Gemini CLI
+- Binary: `gemini`
+- Command: `gemini acp` (or native CLI with ACP flag)
+- Authentication: API key required (OAuth not supported)
 
 ### Qwen Code
-- Integration uses `qwen -p "prompt"` for non-interactive execution.
-- Forked from Gemini CLI, optimized for Qwen3-Coder models.
-- Supports multiple authentication methods:
-  - **Qwen OAuth** (free tier, 1,000 requests/day)
-  - **API keys** (required for headless/CI environments)
-- Supports multiple providers: OpenAI, Anthropic, Google Gemini, Alibaba Cloud.
-- **Note:** OAuth flow requires browser — use API key for CI/automation.
+- Binary: `qwen` or `qwen coder`
+- Command: `qwen acp`
+- Authentication: API key or OAuth
 
-### Pi
-- Integration uses `pi -p "prompt"` for non-interactive execution.
-- Supports multiple providers via `--provider` flag (e.g., `openai`, `anthropic`).
-- Also supports model prefixes: `pi --model openai/gpt-4o "prompt"`.
-- Has RPC mode for stdin/stdout integration.
-- Requires authentication based on selected provider.
+### Claude (with adapter)
+- Binary: `claude` + ACP adapter
+- Command: adapter spawns `claude` with ACP support
+- **ToS Note:** Using Claude Code CLI is allowed; OAuth tokens from Free/Pro/Max plans are NOT permitted for Agent SDK use
+
+### Codex (with adapter)
+- Binary: `codex` + `codex-acp` adapter
+- Command: adapter spawns `codex` with ACP support
+- Uses OpenAI API under the hood (subscription-based)
+
+### Copilot
+- Binary: `copilot`
+- Command: `copilot acp`
+- Authentication: GitHub via `gh auth login`
+
+### Pi (with adapter)
+- Binary: `pi` + `pi-acp` adapter
+- Command: adapter spawns `pi` with ACP support
+- Supports multiple providers via `--provider` flag
 
 ## Test requirements (all providers)
 - [x] Pass shared contract test suite (`internal/providers/contract_test.go` — 7 properties × 7 providers).

@@ -4,8 +4,8 @@ This file is the operating guide for agents working in the Daedalus repository.
 
 ## Project Intent
 - Build Daedalus as a Go-first autonomous delivery CLI/TUI.
-- Keep core engine provider-agnostic.
-- Ship Codex first, keep Claude/Gemini integration-ready without refactoring core.
+- Keep core engine provider-agnostic via ACP (Agent Client Protocol).
+- All providers use ACP for standardized communication.
 
 ## Tech Stack
 - Language: Go (module: `github.com/EstebanForge/daedalus`)
@@ -31,11 +31,11 @@ This file is the operating guide for agents working in the Daedalus repository.
 - `docs/`: all planning/architecture/design/reference markdown
 
 ## Non-Negotiable Design Rules
-- Keep core runtime provider-agnostic.
+- Keep core runtime provider-agnostic via ACP.
 - Do not import provider SDKs in core packages.
 - All provider behavior must go through `internal/providers` contract.
 - Provider-specific details must stay in optional metadata, never core branch logic.
-- Preserve backward-compatible CLI behavior unless explicitly instructed otherwise.
+- ACP is the only supported transport. CLI-based providers are no longer supported.
 - Keep changes minimal, explicit, testable.
 
 ## Provider Model

@@ -115,8 +115,10 @@ Supported keys:
 Common fields:
 - `enabled: bool`
 - `model: string`
-- `approval_policy: string`
-- `sandbox_policy: string`
+- `approval_policy: string` — handled via ACP protocol when supported
+- `sandbox_policy: string` — handled via ACP protocol when supported
+
+**Note:** With ACP transport, approval and sandbox policies are handled at the protocol level. Some providers may not support all policy modes. Check `docs/reference/providers.md` for provider-specific capabilities.
 
 Defaults:
 - `providers.codex.enabled = true`

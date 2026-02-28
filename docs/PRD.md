@@ -62,22 +62,24 @@ Acceptance:
 - Terminal failures keep the story `in_progress` for explicit operator recovery; no automatic `failed` story state in v1.
 
 ### FR-003 Provider runner abstraction
-System must run agent providers through a stable adapter boundary.
+System must run agent providers through a stable adapter boundary using the Agent Client Protocol (ACP).
 
 Acceptance:
-- Each iteration starts a fresh provider session/run.
+- Each iteration starts a provider session via ACP.
 - Adapter streams normalized events to loop and TUI.
 - Adapter errors are typed and retry-aware.
 - Core loop is provider-agnostic.
 - Default provider is configurable and defaults to `codex`.
-- All seven providers (Codex, Claude, Gemini, OpenCode, Copilot, Qwen Code, Pi) integrate via CLI adapters:
-  - Claude: `claude -p`
-  - Gemini: `gemini -p` (API key, not OAuth)
-  - Codex: `codex exec`
-  - OpenCode: `opencode -p`
-  - Copilot: `copilot -p` / `copilot --prompt`
-  - Qwen Code: `qwen -p`
-  - Pi: `pi -p`
+- All seven providers integrate via ACP:
+  - OpenCode: native ACP support
+  - Gemini CLI: native ACP support
+  - Qwen Code: native ACP support
+  - Copilot: ACP in public preview
+  - Claude: requires ACP adapter (Zed adapter)
+  - Codex: requires `codex-acp` adapter
+  - Pi: requires `pi-acp` adapter
+
+See `docs/ACP-migration.md` for detailed provider ACP support matrix.
 
 ### FR-004 Quality gates
 System must execute configured checks before completion.
