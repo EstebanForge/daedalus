@@ -73,7 +73,14 @@ Persistence layer (`events.jsonl`) enriches events with runtime fields (`timesta
 - `toolCalls: bool`
 - `sandboxControl: bool`
 - `approvalModes: []string`
+- `modelSelection: bool`
+- `supportedModels: []string`
 - `maxContextHint: int` (advisory)
+
+Capabilities are negotiated from ACP `initialize` results when the provider exposes
+server capability metadata. Daedalus uses negotiated capabilities to validate
+requested approval policy, sandbox policy, and model selection before dispatching
+`session/prompt`.
 
 ## Error model
 

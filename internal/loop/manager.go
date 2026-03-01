@@ -22,6 +22,12 @@ type RetryPolicy struct {
 	Delays     []time.Duration
 }
 
+type IterationOptions struct {
+	ApprovalPolicy string
+	SandboxPolicy  string
+	Model          string
+}
+
 type qualityChecker interface {
 	Run(ctx context.Context, workDir string, commands []string) (quality.Report, error)
 }
@@ -34,6 +40,7 @@ type Manager struct {
 	store           prd.Store
 	provider        providers.Provider
 	retry           RetryPolicy
+	iteration       IterationOptions
 	qualityChecker  qualityChecker
 	qualityCommands []string
 	committer       committer
@@ -43,14 +50,26 @@ func NewManager(
 	store prd.Store,
 	provider providers.Provider,
 	retry RetryPolicy,
+	iteration IterationOptions,
 	checker qualityChecker,
 	qualityCommands []string,
 	commitService committer,
 ) Manager {
+	if strings.TrimSpace(iteration.ApprovalPolicy) == "" {
+		iteration.ApprovalPolicy = "on-failure"
+	}
+	if strings.TrimSpace(iteration.SandboxPolicy) == "" {
+		iteration.SandboxPolicy = "workspace-write"
+	}
+	if strings.TrimSpace(iteration.Model) == "" {
+		iteration.Model = "default"
+	}
+
 	return Manager{
 		store:           store,
 		provider:        provider,
 		retry:           retry,
+		iteration:       iteration,
 		qualityChecker:  checker,
 		qualityCommands: qualityCommands,
 		committer:       commitService,
@@ -88,9 +107,9 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 		WorkDir:        workDir,
 		Prompt:         prompt,
 		ContextFiles:   buildContextFiles(artifactDir, workDir, name),
-		ApprovalPolicy: "on-failure",
-		SandboxPolicy:  "workspace-write",
-		Model:          "default",
+		ApprovalPolicy: m.iteration.ApprovalPolicy,
+		SandboxPolicy:  m.iteration.SandboxPolicy,
+		Model:          m.iteration.Model,
 		Metadata: map[string]string{
 			"storyID": storyID,
 		},

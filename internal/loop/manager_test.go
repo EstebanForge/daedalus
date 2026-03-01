@@ -87,6 +87,7 @@ func TestRunOnceFailsWhenQualityChecksFail(t *testing.T) {
 		store,
 		fakeProvider{},
 		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
 		fakeChecker{report: quality.Report{Passed: false}},
 		[]string{"go test ./..."},
 		fakeCommitter{},
@@ -110,6 +111,7 @@ func TestRunOnceSucceedsWhenQualityChecksPass(t *testing.T) {
 		store,
 		fakeProvider{},
 		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
@@ -148,6 +150,7 @@ func TestRunOnceWritesProviderEventsToArtifacts(t *testing.T) {
 			{Type: providers.EventAssistantText, Message: "working"},
 		}},
 		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
@@ -198,6 +201,7 @@ func TestRunOnceUsesSeparateArtifactAndExecutionDirs(t *testing.T) {
 			},
 		},
 		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
@@ -231,6 +235,7 @@ func TestRunOncePersistsQualityCommandDetails(t *testing.T) {
 		store,
 		fakeProvider{},
 		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
 		fakeChecker{report: quality.Report{
 			Passed: true,
 			Results: []quality.Result{
@@ -312,6 +317,11 @@ func TestRunOnceBuildsPromptAndContextFiles(t *testing.T) {
 			},
 		},
 		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{
+			ApprovalPolicy: "never",
+			SandboxPolicy:  "workspace-write",
+			Model:          "custom-model",
+		},
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
@@ -329,6 +339,15 @@ func TestRunOnceBuildsPromptAndContextFiles(t *testing.T) {
 	}
 	if len(gotRequest.ContextFiles) < 5 {
 		t.Fatalf("expected required+optional context files, got: %v", gotRequest.ContextFiles)
+	}
+	if gotRequest.ApprovalPolicy != "never" {
+		t.Fatalf("expected approval policy from iteration options, got %q", gotRequest.ApprovalPolicy)
+	}
+	if gotRequest.Model != "custom-model" {
+		t.Fatalf("expected model from iteration options, got %q", gotRequest.Model)
+	}
+	if gotRequest.SandboxPolicy != "workspace-write" {
+		t.Fatalf("expected sandbox policy from iteration options, got %q", gotRequest.SandboxPolicy)
 	}
 	contextJoined := strings.Join(gotRequest.ContextFiles, "\n")
 	if !strings.Contains(contextJoined, ".daedalus/prds/main/prd.md") {

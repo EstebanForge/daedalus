@@ -124,6 +124,26 @@ Checks:
 - no duplicate IDs
 - no duplicate priorities
 
+### `daedalus doctor [provider...]`
+Run ACP transport health checks.
+
+Behavior:
+- Probes all providers when no provider argument is given.
+- Probes only listed providers when one or more provider keys are passed.
+- For each enabled provider, verifies ACP binary presence, runs `initialize`, then runs `session/new`.
+- Returns non-zero when any enabled provider is unhealthy.
+
+### `daedalus sessions [list|status] [provider]`
+Inspect ACP session state and cache.
+
+Subcommands:
+- `list` (default): show persisted cache records and in-memory active sessions.
+- `status`: show summary counts for active, persisted, and stale persisted sessions.
+
+Behavior:
+- Optional provider filter accepts one provider key (`codex`, `claude`, `gemini`, `opencode`, `copilot`, `qwen`, `pi`).
+- Data source: `.daedalus/acp-sessions.json` plus current-process in-memory ACP sessions.
+
 ### `daedalus edit [name]`
 Open `.daedalus/prds/<name>/prd.md` in a local editor.
 

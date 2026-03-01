@@ -120,6 +120,14 @@ Acceptance:
 - Plugin path can invoke loop actions without TUI dependency.
 - Initial adapter command: `daedalus plugin run [name]`.
 
+### FR-012 ACP runtime observability
+System must provide operational observability for ACP health and session lifecycle.
+
+Acceptance:
+- `daedalus doctor [provider...]` validates ACP runtime readiness (binary lookup + initialize + session creation probe).
+- `daedalus sessions list [provider]` shows persisted ACP cache records and active in-process sessions.
+- `daedalus sessions status [provider]` summarizes active/persisted/stale session counts for support debugging.
+
 ### FR-009 First-run onboarding and project discovery
 System must run onboarding before planning/execution when `.daedalus/` is missing or onboarding is incomplete.
 

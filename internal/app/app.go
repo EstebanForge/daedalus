@@ -413,6 +413,10 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.runStatus(store, remainingArgs[1:])
 	case "validate":
 		return a.runValidate(store, remainingArgs[1:])
+	case "doctor":
+		return a.runDoctor(ctx, cfg, global, remainingArgs[1:])
+	case "sessions", "session":
+		return a.runSessions(baseDir, remainingArgs[1:])
 	case "run":
 		return a.runLoop(ctx, store, cfg, global, baseDir, remainingArgs[1:])
 	case "plugin":
@@ -518,6 +522,153 @@ func (a App) runValidate(store prd.Store, args []string) error {
 	return fmt.Errorf("validation failed")
 }
 
+func (a App) runDoctor(ctx context.Context, cfg config.Config, global globalOptions, args []string) error {
+	targets := make([]string, 0, len(args)+1)
+	for _, arg := range args {
+		target := strings.TrimSpace(arg)
+		if target == "" {
+			continue
+		}
+		targets = append(targets, target)
+	}
+	if len(targets) == 0 && global.ProviderSet {
+		targets = append(targets, global.Provider)
+	}
+
+	report, err := providers.RunACPDoctor(ctx, cfg, targets)
+	if err != nil {
+		return err
+	}
+
+	issues := 0
+	for _, check := range report.Checks {
+		if !check.Enabled {
+			a.writef("- %s: disabled (%s)\n", check.ProviderKey, check.Message)
+			continue
+		}
+		if !check.Healthy {
+			issues++
+			a.writef("- %s: FAIL\n", check.ProviderKey)
+			a.writef("  command: %s\n", check.Command)
+			if strings.TrimSpace(check.BinaryPath) != "" {
+				a.writef("  binary: %s\n", check.BinaryPath)
+			}
+			a.writef("  error: %s\n", check.Message)
+			continue
+		}
+
+		a.writef("- %s: OK\n", check.ProviderKey)
+		a.writef("  command: %s\n", check.Command)
+		a.writef("  binary: %s\n", check.BinaryPath)
+		a.writef("  approval_modes: %s\n", strings.Join(check.Capabilities.ApprovalModes, ", "))
+		if len(check.Capabilities.SupportedModels) > 0 {
+			a.writef("  models: %s\n", strings.Join(check.Capabilities.SupportedModels, ", "))
+		}
+	}
+
+	if issues > 0 {
+		return fmt.Errorf("doctor found %d unhealthy provider(s)", issues)
+	}
+	return nil
+}
+
+func (a App) runSessions(baseDir string, args []string) error {
+	subcommand := "list"
+	remaining := args
+	if len(remaining) > 0 {
+		candidate := strings.ToLower(strings.TrimSpace(remaining[0]))
+		if candidate != "" {
+			subcommand = candidate
+			remaining = remaining[1:]
+		}
+	}
+
+	filter := ""
+	if len(remaining) > 0 {
+		filter = strings.ToLower(strings.TrimSpace(remaining[0]))
+		if err := validateProviderFilter(filter); err != nil {
+			return err
+		}
+	}
+
+	switch subcommand {
+	case "list":
+		return a.runSessionsList(baseDir, filter)
+	case "status":
+		return a.runSessionsStatus(baseDir, filter)
+	default:
+		return fmt.Errorf("unknown sessions subcommand: %s", subcommand)
+	}
+}
+
+func (a App) runSessionsList(baseDir, providerFilter string) error {
+	persisted, err := providers.ListPersistedACPSessions(baseDir)
+	if err != nil {
+		return err
+	}
+	active := providers.ListActiveACPSessions()
+
+	persisted = filterPersistedSessionsByProvider(persisted, providerFilter)
+	active = filterActiveSessionsByProvider(active, providerFilter)
+
+	a.writeLine("Persisted ACP sessions:")
+	if len(persisted) == 0 {
+		a.writeLine("(none)")
+	} else {
+		for _, record := range persisted {
+			staleState := "fresh"
+			if record.Stale {
+				staleState = "stale"
+			}
+			a.writef("- provider=%s session=%s updated=%s stale=%s workdir=%s\n", record.ProviderKey, record.SessionID, record.UpdatedAt, staleState, record.WorkDir)
+		}
+	}
+
+	a.writeLine("Active ACP sessions:")
+	if len(active) == 0 {
+		a.writeLine("(none)")
+		return nil
+	}
+	for _, record := range active {
+		a.writef("- provider=%s session=%s last_used=%s expires=%s workdir=%s\n",
+			record.ProviderKey,
+			record.SessionID,
+			record.LastUsedAt.UTC().Format(time.RFC3339),
+			record.ExpiresAt.UTC().Format(time.RFC3339),
+			record.WorkDir,
+		)
+	}
+	return nil
+}
+
+func (a App) runSessionsStatus(baseDir, providerFilter string) error {
+	persisted, err := providers.ListPersistedACPSessions(baseDir)
+	if err != nil {
+		return err
+	}
+	active := providers.ListActiveACPSessions()
+
+	persisted = filterPersistedSessionsByProvider(persisted, providerFilter)
+	active = filterActiveSessionsByProvider(active, providerFilter)
+
+	staleCount := 0
+	for _, record := range persisted {
+		if record.Stale {
+			staleCount++
+		}
+	}
+
+	scope := "all providers"
+	if providerFilter != "" {
+		scope = providerFilter
+	}
+	a.writef("ACP session status (%s)\n", scope)
+	a.writef("- active: %d\n", len(active))
+	a.writef("- persisted: %d\n", len(persisted))
+	a.writef("- stale persisted: %d\n", staleCount)
+	return nil
+}
+
 func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string, args []string) error {
 	ob := onboarding.NewManager(baseDir)
 	required, obErr := ob.IsRequired()
@@ -563,7 +714,7 @@ func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, gl
 	manager := loop.NewManager(store, provider, loop.RetryPolicy{
 		MaxRetries: maxRetries,
 		Delays:     retryDelays,
-	}, quality.NewRunner(), cfg.Quality.Commands, daedalusgit.NewCommitter())
+	}, resolveIterationOptions(cfg, provider.Name()), quality.NewRunner(), cfg.Quality.Commands, daedalusgit.NewCommitter())
 	if err := manager.RunOnce(ctx, name, baseDir, execDir); err != nil {
 		return err
 	}
@@ -583,6 +734,8 @@ func (a App) printHelp() {
 	a.writeLine("  list                List PRDs")
 	a.writeLine("  status [name]       Show PRD status")
 	a.writeLine("  validate [name]     Validate PRD JSON")
+	a.writeLine("  doctor [provider]   Probe ACP provider health")
+	a.writeLine("  sessions [cmd]      ACP session cache observability")
 	a.writeLine("  run [name]          Run one iteration (supports --worktree)")
 	a.writeLine("  plugin run [name]   Plugin adapter: run one iteration and emit JSON result")
 	a.writeLine("  edit [name]         Open prd.md in editor")
@@ -776,7 +929,7 @@ func (a App) runTUICommandLoop(
 		switch cmd {
 		case "?", "help":
 			a.writeLine("Views: d/dashboard, u/stories, l/logs, diff, picker, h/help, ,/settings")
-			a.writeLine("Actions: s/run, p/pause, x/stop, xx/stop-now, v/validate, n/use <name>, 1-9 switch PRD tab, provider <name>, providers, list, status, f/filter <event|all>, tail <n>, q/quit")
+			a.writeLine("Actions: s/run, p/pause, x/stop, xx/stop-now, v/validate, n/use <name>, 1-9 switch PRD tab, provider <name>, providers, list, status, doctor [provider], sessions [list|status] [provider], f/filter <event|all>, tail <n>, q/quit")
 		case "d", "dashboard":
 			state.setView("dashboard")
 			state.setActivity("Dashboard view.")
@@ -847,6 +1000,22 @@ func (a App) runTUICommandLoop(
 			a.writef("Runtime: state=%s iterations=%d provider=%s last_run_at=%s\n", snap.loopState, snap.iterations, snap.provider, snap.lastRunAt)
 			if err := a.runStatus(store, []string{target}); err != nil {
 				state.setActivity("Failed to read PRD status.")
+				a.writef("Error: %v\n", err)
+			}
+		case "doctor":
+			targets := []string{}
+			if len(args) > 0 {
+				targets = append(targets, args...)
+			}
+			state.setActivity("Running ACP doctor checks.")
+			if err := a.runDoctor(ctx, cfg, global, targets); err != nil {
+				state.setActivity("Doctor checks found issues.")
+				a.writef("Error: %v\n", err)
+			}
+		case "sessions", "session":
+			state.setActivity("Showing ACP session observability.")
+			if err := a.runSessions(baseDir, args); err != nil {
+				state.setActivity("ACP session observability failed.")
 				a.writef("Error: %v\n", err)
 			}
 		case "v", "validate":
@@ -1417,4 +1586,88 @@ func resolveRuntimeSettings(cfg config.Config, global globalOptions, run runOpti
 	}
 
 	return providerName, maxRetries, retryDelays, useWorktree, nil
+}
+
+func resolveIterationOptions(cfg config.Config, providerName string) loop.IterationOptions {
+	providerCfg := providerConfigForKey(cfg, providerName)
+	approvalPolicy := strings.TrimSpace(providerCfg.ApprovalPolicy)
+	if approvalPolicy == "" {
+		approvalPolicy = "on-failure"
+	}
+	sandboxPolicy := strings.TrimSpace(providerCfg.SandboxPolicy)
+	if sandboxPolicy == "" {
+		sandboxPolicy = "workspace-write"
+	}
+	model := strings.TrimSpace(providerCfg.Model)
+	if model == "" {
+		model = "default"
+	}
+
+	return loop.IterationOptions{
+		ApprovalPolicy: approvalPolicy,
+		SandboxPolicy:  sandboxPolicy,
+		Model:          model,
+	}
+}
+
+func providerConfigForKey(cfg config.Config, providerName string) config.GenericProviderConfig {
+	switch strings.ToLower(strings.TrimSpace(providerName)) {
+	case "codex":
+		return cfg.Providers.Codex
+	case "claude":
+		return cfg.Providers.Claude
+	case "gemini":
+		return cfg.Providers.Gemini
+	case "opencode":
+		return cfg.Providers.OpenCode
+	case "copilot":
+		return cfg.Providers.Copilot
+	case "qwen":
+		return cfg.Providers.Qwen
+	case "pi":
+		return cfg.Providers.Pi
+	default:
+		return cfg.Providers.Codex
+	}
+}
+
+func validateProviderFilter(provider string) error {
+	trimmed := strings.TrimSpace(strings.ToLower(provider))
+	if trimmed == "" {
+		return nil
+	}
+	for _, known := range providers.KnownProviderKeys() {
+		if known == trimmed {
+			return nil
+		}
+	}
+	return providers.NewUnknownProviderError(trimmed)
+}
+
+func filterPersistedSessionsByProvider(records []providers.ACPPersistedSessionInfo, provider string) []providers.ACPPersistedSessionInfo {
+	trimmed := strings.TrimSpace(strings.ToLower(provider))
+	if trimmed == "" {
+		return records
+	}
+	filtered := make([]providers.ACPPersistedSessionInfo, 0, len(records))
+	for _, record := range records {
+		if strings.EqualFold(record.ProviderKey, trimmed) {
+			filtered = append(filtered, record)
+		}
+	}
+	return filtered
+}
+
+func filterActiveSessionsByProvider(records []providers.ACPActiveSessionInfo, provider string) []providers.ACPActiveSessionInfo {
+	trimmed := strings.TrimSpace(strings.ToLower(provider))
+	if trimmed == "" {
+		return records
+	}
+	filtered := make([]providers.ACPActiveSessionInfo, 0, len(records))
+	for _, record := range records {
+		if strings.EqualFold(record.ProviderKey, trimmed) {
+			filtered = append(filtered, record)
+		}
+	}
+	return filtered
 }

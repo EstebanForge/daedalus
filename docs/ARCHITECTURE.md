@@ -35,6 +35,7 @@ Responsibilities:
 - Process lifecycle.
 - Dependency wiring.
 - Command routing.
+- Operational diagnostics routing (`doctor`, `sessions list`, `sessions status`).
 - Enforce startup ordering: onboarding first when required.
 
 ### Onboarding manager
@@ -274,6 +275,9 @@ Worktree lifecycle and safety rules are specified in:
 - All providers use ACP (Agent Client Protocol) for communication.
 - ACP provides standardized JSON-RPC interface across all agents.
 - Session management supports in-process reuse and zero-config best-effort resume across restarts.
+- Runtime observability is exposed via CLI:
+  - `daedalus doctor [provider...]` probes ACP binary/initialize/session health.
+  - `daedalus sessions [list|status] [provider]` inspects persisted and active ACP sessions.
 - See `docs/ACP-migration.md` for detailed migration plan.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.

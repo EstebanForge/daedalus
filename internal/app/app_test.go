@@ -198,6 +198,124 @@ func TestResolveRuntimeSettingsWorktreePrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveIterationOptionsUsesProviderConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Providers.Gemini.Model = "gemini-2.5-pro"
+	cfg.Providers.Gemini.ApprovalPolicy = "never"
+	cfg.Providers.Gemini.SandboxPolicy = "workspace-write"
+
+	options := resolveIterationOptions(cfg, "gemini")
+	if options.Model != "gemini-2.5-pro" {
+		t.Fatalf("unexpected model: %q", options.Model)
+	}
+	if options.ApprovalPolicy != "never" {
+		t.Fatalf("unexpected approval policy: %q", options.ApprovalPolicy)
+	}
+	if options.SandboxPolicy != "workspace-write" {
+		t.Fatalf("unexpected sandbox policy: %q", options.SandboxPolicy)
+	}
+}
+
+func TestRunDoctorReturnsErrorForUnhealthyProvider(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Providers.Codex.Enabled = true
+	cfg.Providers.Codex.ACPCommand = "definitely-missing-acp-binary"
+
+	var out bytes.Buffer
+	application := App{
+		version: "test",
+		in:      strings.NewReader(""),
+		out:     &out,
+	}
+
+	err := application.runDoctor(context.Background(), cfg, globalOptions{}, []string{"codex"})
+	if err == nil {
+		t.Fatal("expected doctor error")
+	}
+	if !strings.Contains(err.Error(), "unhealthy provider") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "codex: FAIL") {
+		t.Fatalf("expected failure output, got: %s", text)
+	}
+}
+
+func TestRunSessionsListNoData(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	var out bytes.Buffer
+	application := App{
+		version: "test",
+		in:      strings.NewReader(""),
+		out:     &out,
+	}
+
+	if err := application.runSessions(baseDir, nil); err != nil {
+		t.Fatalf("run sessions: %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "Persisted ACP sessions:") {
+		t.Fatalf("expected persisted section, got: %s", text)
+	}
+	if !strings.Contains(text, "Active ACP sessions:") {
+		t.Fatalf("expected active section, got: %s", text)
+	}
+}
+
+func TestRunSessionsStatusReadsPersistedCache(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	cachePath := project.ACPSessionsPath(baseDir)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		t.Fatalf("mkdir cache dir: %v", err)
+	}
+	cacheJSON := `{"version":1,"sessions":{"codex:/tmp/repo":{"providerKey":"codex","workDir":"/tmp/repo","command":"codex-acp","sessionId":"sess-1","createdAt":"2026-02-28T10:00:00Z","updatedAt":"2026-02-28T10:05:00Z"}}}`
+	if err := os.WriteFile(cachePath, []byte(cacheJSON), 0o644); err != nil {
+		t.Fatalf("write cache file: %v", err)
+	}
+
+	var out bytes.Buffer
+	application := App{
+		version: "test",
+		in:      strings.NewReader(""),
+		out:     &out,
+	}
+
+	if err := application.runSessions(baseDir, []string{"status"}); err != nil {
+		t.Fatalf("run sessions status: %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "persisted: 1") {
+		t.Fatalf("expected persisted count in status, got: %s", text)
+	}
+}
+
+func TestRunSessionsUnknownSubcommand(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	application := App{
+		version: "test",
+		in:      strings.NewReader(""),
+		out:     &out,
+	}
+
+	err := application.runSessions(t.TempDir(), []string{"unknown"})
+	if err == nil {
+		t.Fatal("expected sessions subcommand error")
+	}
+	if !strings.Contains(err.Error(), "unknown sessions subcommand") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunEditUsesConfiguredEditor(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DAEDALUS_CONFIG", filepath.Join(tmp, "missing-config.toml"))

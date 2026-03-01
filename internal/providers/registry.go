@@ -11,6 +11,21 @@ type Registry struct {
 	builders map[string]func(config.Config) Provider
 }
 
+var knownProviderKeys = []string{
+	"codex",
+	"claude",
+	"gemini",
+	"opencode",
+	"copilot",
+	"qwen",
+	"pi",
+}
+
+// KnownProviderKeys returns the canonical provider keys supported by Daedalus.
+func KnownProviderKeys() []string {
+	return append([]string(nil), knownProviderKeys...)
+}
+
 func NewRegistry() Registry {
 	return Registry{
 		builders: map[string]func(config.Config) Provider{

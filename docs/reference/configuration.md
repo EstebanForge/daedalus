@@ -122,6 +122,11 @@ Common fields:
 
 **Note:** With ACP transport, approval and sandbox policies are handled at the protocol level. Some providers may not support all policy modes. Check `docs/reference/providers.md` for provider-specific capabilities.
 
+Runtime behavior:
+- `daedalus run` resolves `model`, `approval_policy`, and `sandbox_policy` from the selected provider config.
+- Daedalus validates these values against negotiated provider capabilities before prompting.
+- Use `daedalus doctor` to probe ACP binary/initialize/session health and inspect negotiated capability support.
+
 Defaults:
 - `providers.codex.enabled = true`
 - `providers.codex.model = "default"`

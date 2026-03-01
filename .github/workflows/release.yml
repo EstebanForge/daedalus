@@ -1,0 +1,200 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (example: 1.2.3 or 1.2.3-rc.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve_version.outputs.version }}
+      is_prerelease: ${{ steps.resolve_version.outputs.is_prerelease }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Resolve release version
+        id: resolve_version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="${{ github.event.inputs.tag }}"
+          fi
+
+          if [ -z "${VERSION}" ]; then
+            echo "Error: VERSION is empty"
+            exit 1
+          fi
+
+          if [[ "${VERSION}" == v* ]]; then
+            echo "Error: tags must not use 'v' prefix (got: ${VERSION})"
+            exit 1
+          fi
+
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: VERSION must be SemVer-like (got: ${VERSION})"
+            exit 1
+          fi
+
+          BASE_VERSION="${VERSION%%+*}"
+          if [[ "${BASE_VERSION}" == *-* ]]; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
+
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "VERSION_SEMVER=${VERSION}" >> "${GITHUB_ENV}"
+          echo "IS_PRERELEASE=${IS_PRERELEASE}" >> "${GITHUB_ENV}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "is_prerelease=${IS_PRERELEASE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Sync VERSION file with tag
+        run: echo "${{ env.VERSION_SEMVER }}" > VERSION
+
+      - name: Run tests
+        run: make test
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.9.0
+          args: --timeout=5m
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ env.VERSION }}
+        run: |
+          set -e
+          mkdir -p dist
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/daedalus-linux-amd64 ./cmd/daedalus
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/daedalus-linux-arm64 ./cmd/daedalus
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/daedalus-darwin-amd64 ./cmd/daedalus
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/daedalus-darwin-arm64 ./cmd/daedalus
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/daedalus-windows-amd64.exe ./cmd/daedalus
+
+          tar -czf dist/daedalus-linux-amd64-${VERSION}.tar.gz -C dist daedalus-linux-amd64
+          tar -czf dist/daedalus-linux-arm64-${VERSION}.tar.gz -C dist daedalus-linux-arm64
+          tar -czf dist/daedalus-darwin-amd64-${VERSION}.tar.gz -C dist daedalus-darwin-amd64
+          tar -czf dist/daedalus-darwin-arm64-${VERSION}.tar.gz -C dist daedalus-darwin-arm64
+
+          cd dist
+          sha256sum \
+            daedalus-linux-amd64-${VERSION}.tar.gz \
+            daedalus-linux-arm64-${VERSION}.tar.gz \
+            daedalus-darwin-amd64-${VERSION}.tar.gz \
+            daedalus-darwin-arm64-${VERSION}.tar.gz \
+            daedalus-windows-amd64.exe \
+            > checksums.txt
+
+      - name: Verify release outputs
+        env:
+          VERSION: ${{ env.VERSION }}
+        run: |
+          set -e
+          expected_files=(
+            "dist/daedalus-linux-amd64-${VERSION}.tar.gz"
+            "dist/daedalus-linux-arm64-${VERSION}.tar.gz"
+            "dist/daedalus-darwin-amd64-${VERSION}.tar.gz"
+            "dist/daedalus-darwin-arm64-${VERSION}.tar.gz"
+            "dist/daedalus-windows-amd64.exe"
+            "dist/checksums.txt"
+          )
+
+          for file in "${expected_files[@]}"; do
+            if [ -f "${file}" ]; then
+              size=$(stat -c%s "${file}")
+              echo "OK ${file} (size: ${size} bytes)"
+            else
+              echo "Missing expected artifact: ${file}"
+              exit 1
+            fi
+          done
+
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          VERSION_SEMVER: ${{ env.VERSION_SEMVER }}
+        run: |
+          set -euo pipefail
+
+          changelog_file="CHANGELOG.md"
+          notes_file="release_notes.md"
+          start_marker="<!-- RELEASE:START ${VERSION_SEMVER} -->"
+          end_marker="<!-- RELEASE:END ${VERSION_SEMVER} -->"
+
+          if [ -f "${changelog_file}" ]; then
+            awk -v start="${start_marker}" -v end="${end_marker}" '
+              $0 == start { in_section = 1; next }
+              $0 == end { in_section = 0; exit }
+              in_section { print }
+            ' "${changelog_file}" > "${notes_file}"
+          else
+            : > "${notes_file}"
+          fi
+
+          if ! grep -q '[^[:space:]]' "${notes_file}"; then
+            prev_tag=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+            if [ -n "${prev_tag}" ]; then
+              echo "**Full changelog:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${prev_tag}...${VERSION_SEMVER}" > "${notes_file}"
+            else
+              echo "**Full changelog:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${VERSION_SEMVER}" > "${notes_file}"
+            fi
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Daedalus ${{ env.VERSION }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ steps.resolve_version.outputs.is_prerelease == 'true' }}
+          files: |
+            dist/daedalus-linux-amd64-${{ env.VERSION }}.tar.gz
+            dist/daedalus-linux-arm64-${{ env.VERSION }}.tar.gz
+            dist/daedalus-darwin-amd64-${{ env.VERSION }}.tar.gz
+            dist/daedalus-darwin-arm64-${{ env.VERSION }}.tar.gz
+            dist/daedalus-windows-amd64.exe
+            dist/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update VERSION file on main
+        env:
+          VERSION_SEMVER: ${{ env.VERSION_SEMVER }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "${VERSION_SEMVER}" > VERSION
+          git add VERSION
+          git commit -m "chore: update VERSION to ${VERSION_SEMVER}" || echo "No changes to commit"
+          git push origin HEAD:main || echo "Failed to push VERSION file update"

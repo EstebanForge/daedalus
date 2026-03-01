@@ -55,12 +55,17 @@ This file is the operating guide for agents working in the Daedalus repository.
 - `max_retries = 3`
 - `delays = ["0s", "5s", "15s"]`
 
-## CLI Contract (v1)
+## CLI Contract (implemented)
+- `daedalus` (launch TUI / onboarding flow)
 - `daedalus new [name]`
 - `daedalus list`
 - `daedalus status [name]`
 - `daedalus validate [name]`
-- `daedalus run [name] [--provider <name>] [--max-retries <n>] [--retry-delays <csv>]`
+- `daedalus doctor [provider...]`
+- `daedalus sessions [list|status] [provider]`
+- `daedalus run [name] [--provider <name>] [--worktree[=<bool>]] [--max-retries <n>] [--retry-delays <csv>]`
+- `daedalus plugin run [name]`
+- `daedalus edit [name]`
 - `daedalus help`
 - `daedalus version`
 

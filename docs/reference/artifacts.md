@@ -36,6 +36,7 @@ Purpose:
 Behavior:
 - Cache is advisory; providers may reject stale session IDs.
 - On resume failure, runtime falls back to creating a fresh ACP session.
+- `daedalus sessions list` and `daedalus sessions status` expose persisted/active session observability for support debugging.
 
 All three markdown files above are generated from canonical templates embedded in
 `internal/templates/`. The templates define fixed section headings that must be

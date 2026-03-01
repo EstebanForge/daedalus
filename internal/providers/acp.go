@@ -42,6 +42,9 @@ var (
 	acpSessionsMu sync.RWMutex
 
 	acpPersistenceMu sync.Mutex
+
+	acpCapabilities   = make(map[string]Capabilities)
+	acpCapabilitiesMu sync.RWMutex
 )
 
 type acpReadResult struct {
@@ -63,7 +66,10 @@ type acpSessionState struct {
 	writeMu   sync.Mutex
 	idMu      sync.Mutex
 	useMu     sync.Mutex
+	capMu     sync.RWMutex
 	messageID int
+
+	capabilities Capabilities
 }
 
 type acpSessionCache struct {
@@ -93,6 +99,10 @@ func CloseAllSessions() {
 	for _, session := range sessions {
 		closeACPSession(session)
 	}
+
+	acpCapabilitiesMu.Lock()
+	clear(acpCapabilities)
+	acpCapabilitiesMu.Unlock()
 }
 
 func newACPProvider(cfg config.Config, providerKey string) Provider {
@@ -154,12 +164,42 @@ func (p acpProvider) Name() string {
 }
 
 func (p acpProvider) Capabilities() Capabilities {
-	return Capabilities{
-		Streaming:      true,
-		ToolCalls:      true,
-		SandboxControl: true,
-		ApprovalModes:  []string{"on-failure", "on-request", "never"},
+	if negotiated, ok := p.loadNegotiatedCapabilities(); ok {
+		return negotiated
 	}
+	return p.defaultCapabilities()
+}
+
+func (p acpProvider) defaultCapabilities() Capabilities {
+	return Capabilities{
+		Streaming:       true,
+		ToolCalls:       true,
+		SandboxControl:  true,
+		ApprovalModes:   []string{"on-failure", "on-request", "never"},
+		ModelSelection:  true,
+		SupportedModels: nil,
+		MaxContextHint:  0,
+	}
+}
+
+func (p acpProvider) capabilitiesKey() string {
+	return p.providerKey + "\x00" + p.commandFingerprint()
+}
+
+func (p acpProvider) saveNegotiatedCapabilities(c Capabilities) {
+	acpCapabilitiesMu.Lock()
+	acpCapabilities[p.capabilitiesKey()] = c
+	acpCapabilitiesMu.Unlock()
+}
+
+func (p acpProvider) loadNegotiatedCapabilities() (Capabilities, bool) {
+	acpCapabilitiesMu.RLock()
+	defer acpCapabilitiesMu.RUnlock()
+	c, ok := acpCapabilities[p.capabilitiesKey()]
+	if !ok {
+		return Capabilities{}, false
+	}
+	return c, true
 }
 
 func (p acpProvider) RunIteration(ctx context.Context, request IterationRequest) (<-chan Event, IterationResult, error) {
@@ -169,6 +209,9 @@ func (p acpProvider) RunIteration(ctx context.Context, request IterationRequest)
 
 	session, sessionKey, err := p.ensureSession(request.WorkDir)
 	if err != nil {
+		return nil, IterationResult{}, err
+	}
+	if err := p.validateRequest(request, session.getCapabilities()); err != nil {
 		return nil, IterationResult{}, err
 	}
 
@@ -250,6 +293,7 @@ func (p acpProvider) ensureSession(workDir string) (*acpSessionState, string, er
 	now := time.Now()
 	if existing != nil && isProcessAlive(existing.Cmd) && !existing.isExpired(now) {
 		existing.markUsed(now)
+		p.saveNegotiatedCapabilities(existing.getCapabilities())
 		_ = p.savePersistedSession(existing.Cwd, sessionKey, existing.ID, existing.startedAt, now)
 		return existing, sessionKey, nil
 	}
@@ -332,15 +376,17 @@ func (p acpProvider) startSession(workDir string) (*acpSessionState, error) {
 	}()
 
 	now := time.Now()
+	defaultCapabilities := p.defaultCapabilities()
 	return &acpSessionState{
-		Cwd:         resolvedWorkDir,
-		Cmd:         cmd,
-		Stdin:       stdin,
-		ReadResults: startJSONLineReader(stdout),
-		StderrLines: startTextLineReader(stderr),
-		startedAt:   now,
-		lastUsedAt:  now,
-		messageID:   1,
+		Cwd:          resolvedWorkDir,
+		Cmd:          cmd,
+		Stdin:        stdin,
+		ReadResults:  startJSONLineReader(stdout),
+		StderrLines:  startTextLineReader(stderr),
+		startedAt:    now,
+		lastUsedAt:   now,
+		messageID:    1,
+		capabilities: defaultCapabilities,
 	}, nil
 }
 
@@ -373,6 +419,14 @@ func (p acpProvider) initializeTransport(ctx context.Context, session *acpSessio
 	if initResp.Error != nil {
 		return fmt.Errorf("ACP initialize error: %s", initResp.Error.Message)
 	}
+
+	capabilities := p.defaultCapabilities()
+	if negotiated, ok := parseInitializeCapabilities(initResp.Result, capabilities); ok {
+		capabilities = negotiated
+	}
+	session.setCapabilities(capabilities)
+	p.saveNegotiatedCapabilities(capabilities)
+
 	return nil
 }
 
@@ -668,6 +722,18 @@ func (s *acpSessionState) markUsed(now time.Time) {
 	s.lastUsedAt = now
 }
 
+func (s *acpSessionState) setCapabilities(capabilities Capabilities) {
+	s.capMu.Lock()
+	defer s.capMu.Unlock()
+	s.capabilities = capabilities
+}
+
+func (s *acpSessionState) getCapabilities() Capabilities {
+	s.capMu.RLock()
+	defer s.capMu.RUnlock()
+	return s.capabilities
+}
+
 func (s *acpSessionState) isExpired(now time.Time) bool {
 	s.useMu.Lock()
 	lastUsed := s.lastUsedAt
@@ -762,6 +828,207 @@ func containsAny(value string, fragments ...string) bool {
 		}
 	}
 	return false
+}
+
+func (p acpProvider) validateRequest(request IterationRequest, capabilities Capabilities) error {
+	approval := strings.TrimSpace(strings.ToLower(request.ApprovalPolicy))
+	if approval != "" && len(capabilities.ApprovalModes) > 0 && !containsStringFold(capabilities.ApprovalModes, approval) {
+		return NewConfigurationError(
+			fmt.Sprintf(
+				"provider %q does not support approval policy %q (supported: %s)",
+				p.providerKey,
+				request.ApprovalPolicy,
+				strings.Join(capabilities.ApprovalModes, ", "),
+			),
+			nil,
+		)
+	}
+
+	sandbox := strings.TrimSpace(request.SandboxPolicy)
+	if sandbox != "" && !capabilities.SandboxControl {
+		return NewConfigurationError(
+			fmt.Sprintf("provider %q does not support sandbox policy overrides", p.providerKey),
+			nil,
+		)
+	}
+
+	model := strings.TrimSpace(request.Model)
+	if model == "" || strings.EqualFold(model, "default") {
+		return nil
+	}
+	if !capabilities.ModelSelection {
+		return NewConfigurationError(
+			fmt.Sprintf("provider %q does not support explicit model selection", p.providerKey),
+			nil,
+		)
+	}
+	if len(capabilities.SupportedModels) > 0 && !containsStringFold(capabilities.SupportedModels, model) {
+		return NewConfigurationError(
+			fmt.Sprintf(
+				"provider %q does not support model %q (supported: %s)",
+				p.providerKey,
+				model,
+				strings.Join(capabilities.SupportedModels, ", "),
+			),
+			nil,
+		)
+	}
+	return nil
+}
+
+func containsStringFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseInitializeCapabilities(raw json.RawMessage, fallback Capabilities) (Capabilities, bool) {
+	if len(raw) == 0 {
+		return fallback, false
+	}
+
+	var root map[string]interface{}
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return fallback, false
+	}
+
+	capabilityNode := root
+	if nested, ok := root["serverCapabilities"].(map[string]interface{}); ok {
+		capabilityNode = nested
+	} else if nested, ok := root["capabilities"].(map[string]interface{}); ok {
+		capabilityNode = nested
+	}
+
+	parsed := fallback
+	updated := false
+
+	if value, ok := boolFromAny(capabilityNode["streaming"]); ok {
+		parsed.Streaming = value
+		updated = true
+	}
+	if value, ok := boolFromAny(firstKnownKey(capabilityNode, "toolCalls", "tools")); ok {
+		parsed.ToolCalls = value
+		updated = true
+	}
+	if value, ok := boolFromAny(firstKnownKey(capabilityNode, "sandboxControl", "sandbox")); ok {
+		parsed.SandboxControl = value
+		updated = true
+	}
+
+	if modes, ok := stringSliceFromAny(firstKnownKey(capabilityNode, "approvalModes", "approvalPolicies")); ok {
+		parsed.ApprovalModes = modes
+		updated = true
+	} else if approvalNode, ok := capabilityNode["approval"].(map[string]interface{}); ok {
+		if modes, ok := stringSliceFromAny(firstKnownKey(approvalNode, "modes", "approvalModes")); ok {
+			parsed.ApprovalModes = modes
+			updated = true
+		}
+	}
+
+	if value, ok := boolFromAny(firstKnownKey(capabilityNode, "modelSelection", "modelControl")); ok {
+		parsed.ModelSelection = value
+		updated = true
+	}
+	if models, ok := stringSliceFromAny(firstKnownKey(capabilityNode, "supportedModels", "models")); ok {
+		parsed.SupportedModels = models
+		updated = true
+	}
+	if value, ok := intFromAny(firstKnownKey(capabilityNode, "maxContextHint", "maxContextTokens")); ok {
+		parsed.MaxContextHint = value
+		updated = true
+	}
+
+	return parsed, updated
+}
+
+func firstKnownKey(m map[string]interface{}, keys ...string) interface{} {
+	for _, key := range keys {
+		if value, ok := m[key]; ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func boolFromAny(value interface{}) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		normalized := strings.TrimSpace(strings.ToLower(typed))
+		switch normalized {
+		case "1", "true", "yes", "on":
+			return true, true
+		case "0", "false", "no", "off":
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func intFromAny(value interface{}) (int, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed), true
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case json.Number:
+		number, err := typed.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(number), true
+	}
+	return 0, false
+}
+
+func stringSliceFromAny(value interface{}) ([]string, bool) {
+	switch typed := value.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		if len(out) == 0 {
+			return nil, false
+		}
+		return out, true
+	case []interface{}:
+		out := make([]string, 0, len(typed))
+		for _, raw := range typed {
+			switch value := raw.(type) {
+			case string:
+				if trimmed := strings.TrimSpace(value); trimmed != "" {
+					out = append(out, trimmed)
+				}
+			case map[string]interface{}:
+				if idValue, ok := value["id"].(string); ok {
+					if trimmed := strings.TrimSpace(idValue); trimmed != "" {
+						out = append(out, trimmed)
+						continue
+					}
+				}
+				if nameValue, ok := value["name"].(string); ok {
+					if trimmed := strings.TrimSpace(nameValue); trimmed != "" {
+						out = append(out, trimmed)
+					}
+				}
+			}
+		}
+		if len(out) == 0 {
+			return nil, false
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func parseSessionIDFromResult(raw json.RawMessage) string {

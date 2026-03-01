@@ -203,6 +203,121 @@ func TestResolveACPSessionCachePathUsesDaedalusDir(t *testing.T) {
 	}
 }
 
+func TestACPProviderNegotiatesCapabilities(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Cleanup(CloseAllSessions)
+
+	cfg := config.Defaults()
+	cfg.Providers.Codex.Enabled = true
+	cfg.Providers.Codex.ACPCommand = helperACPCommand("acp-capabilities-helper")
+
+	provider := newACPProvider(cfg, "codex")
+	events, _, err := provider.RunIteration(context.Background(), IterationRequest{
+		WorkDir:        t.TempDir(),
+		Prompt:         "hello",
+		ApprovalPolicy: "never",
+		SandboxPolicy:  "",
+		Model:          "model-a",
+	})
+	if err != nil {
+		t.Fatalf("run iteration: %v", err)
+	}
+	_ = collectEvents(events)
+
+	capabilities := provider.Capabilities()
+	if capabilities.Streaming {
+		t.Fatalf("expected negotiated streaming=false, got %+v", capabilities)
+	}
+	if capabilities.SandboxControl {
+		t.Fatalf("expected negotiated sandbox control=false, got %+v", capabilities)
+	}
+	if !containsStringFold(capabilities.ApprovalModes, "never") {
+		t.Fatalf("expected negotiated approval mode never, got %+v", capabilities)
+	}
+	if len(capabilities.SupportedModels) == 0 || !containsStringFold(capabilities.SupportedModels, "model-a") {
+		t.Fatalf("expected negotiated supported models, got %+v", capabilities)
+	}
+}
+
+func TestACPProviderRejectsUnsupportedApprovalPolicy(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Cleanup(CloseAllSessions)
+
+	cfg := config.Defaults()
+	cfg.Providers.Codex.Enabled = true
+	cfg.Providers.Codex.ACPCommand = helperACPCommand("acp-capabilities-helper")
+
+	provider := newACPProvider(cfg, "codex")
+	events, _, err := provider.RunIteration(context.Background(), IterationRequest{
+		WorkDir:        t.TempDir(),
+		Prompt:         "hello",
+		ApprovalPolicy: "on-failure",
+		Model:          "model-a",
+	})
+	if err == nil {
+		t.Fatal("expected unsupported approval policy error")
+	}
+	if events != nil {
+		t.Fatal("expected nil events on validation error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "approval policy") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestACPProviderRejectsUnsupportedSandboxPolicy(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Cleanup(CloseAllSessions)
+
+	cfg := config.Defaults()
+	cfg.Providers.Codex.Enabled = true
+	cfg.Providers.Codex.ACPCommand = helperACPCommand("acp-capabilities-helper")
+
+	provider := newACPProvider(cfg, "codex")
+	events, _, err := provider.RunIteration(context.Background(), IterationRequest{
+		WorkDir:        t.TempDir(),
+		Prompt:         "hello",
+		ApprovalPolicy: "never",
+		SandboxPolicy:  "workspace-write",
+		Model:          "model-a",
+	})
+	if err == nil {
+		t.Fatal("expected unsupported sandbox policy error")
+	}
+	if events != nil {
+		t.Fatal("expected nil events on validation error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "sandbox policy") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestACPProviderRejectsUnsupportedModel(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Cleanup(CloseAllSessions)
+
+	cfg := config.Defaults()
+	cfg.Providers.Codex.Enabled = true
+	cfg.Providers.Codex.ACPCommand = helperACPCommand("acp-capabilities-helper")
+
+	provider := newACPProvider(cfg, "codex")
+	events, _, err := provider.RunIteration(context.Background(), IterationRequest{
+		WorkDir:        t.TempDir(),
+		Prompt:         "hello",
+		ApprovalPolicy: "never",
+		Model:          "model-x",
+	})
+	if err == nil {
+		t.Fatal("expected unsupported model error")
+	}
+	if events != nil {
+		t.Fatal("expected nil events on validation error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "does not support model") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func containsEventType(events []Event, target EventType) bool {
 	for _, event := range events {
 		if event.Type == target {
@@ -243,7 +358,11 @@ func TestACPHelperProcess(t *testing.T) {
 	if mode == "" {
 		os.Exit(2)
 	}
-	if mode != "acp-helper" && mode != "acp-error-helper" && mode != "acp-resume-helper" && mode != "acp-no-resume-helper" {
+	if mode != "acp-helper" &&
+		mode != "acp-error-helper" &&
+		mode != "acp-resume-helper" &&
+		mode != "acp-no-resume-helper" &&
+		mode != "acp-capabilities-helper" {
 		os.Exit(2)
 	}
 
@@ -273,6 +392,23 @@ func runACPHelperServer(mode string) {
 
 		switch req.Method {
 		case "initialize":
+			if mode == "acp-capabilities-helper" {
+				writeRPC(writer, acpJSONRPC{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result: mustMarshalJSON(map[string]interface{}{
+						"serverCapabilities": map[string]interface{}{
+							"streaming":      false,
+							"toolCalls":      true,
+							"sandboxControl": false,
+							"approvalModes":  []string{"never"},
+							"modelSelection": true,
+							"models":         []string{"model-a", "model-b"},
+						},
+					}),
+				})
+				continue
+			}
 			writeRPC(writer, acpJSONRPC{
 				JSONRPC: "2.0",
 				ID:      req.ID,

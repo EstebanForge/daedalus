@@ -36,11 +36,13 @@ type IterationResult struct {
 }
 
 type Capabilities struct {
-	Streaming      bool
-	ToolCalls      bool
-	SandboxControl bool
-	ApprovalModes  []string
-	MaxContextHint int
+	Streaming       bool
+	ToolCalls       bool
+	SandboxControl  bool
+	ApprovalModes   []string
+	ModelSelection  bool
+	SupportedModels []string
+	MaxContextHint  int
 }
 
 type Provider interface {

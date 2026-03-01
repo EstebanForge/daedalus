@@ -2,7 +2,7 @@
 
 > **Status:** In Progress
 > **Created:** 2026-02-26
-> **Last Updated:** 2026-02-28
+> **Last Updated:** 2026-03-01
 > **Target:** Daedalus v2.0
 
 ## Summary
@@ -28,6 +28,8 @@ Done:
 - Registry routes all provider keys to ACP provider construction.
 - ACP JSON-RPC types and initialize/session lifecycle scaffolding exist.
 - Core loop and onboarding scan paths are already wired through provider abstraction.
+- Capability negotiation is parsed from ACP initialize responses and enforced for policy/model compatibility.
+- Runtime diagnostics commands are available for ACP health and session observability.
 
 In progress:
 - Real-provider ACP integration execution and provider-specific validation.
