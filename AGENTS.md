@@ -65,11 +65,14 @@ This file is the operating guide for agents working in the Daedalus repository.
 - `daedalus version`
 
 ## Build, Lint, Test
-- Format: `gofmt -w <files>`
-- Vet: `go vet ./...`
-- Lint: `golangci-lint run ./...`
-- Test: `go test ./...`
-- Verification is incomplete unless lint, vet, and tests all pass.
+- Build: `make build` (outputs `bin/daedalus`, unsigned local build)
+- Sign (optional, macOS): `make sign` or `make build-signed`
+- Format: `make fmt` (`go fmt ./...`, then `goimports -w .` if installed)
+- Vet: `make vet`
+- Lint: `make lint`
+- Test: `make test` (`go mod download`, `go mod verify`, then `go test ./...`; `-race` when CGO is enabled)
+- Full verification: `make check` or `./scripts/checks.sh` (`fmt -> vet -> lint -> test -> build`)
+- CI alias: `make ci` (same as `make check`)
 
 ## Agent Workflow Protocol
 - Search first, code second.
@@ -80,9 +83,10 @@ This file is the operating guide for agents working in the Daedalus repository.
 
 ## Definition of Done
 - Code compiles.
-- `go test ./...` passes.
-- `go vet ./...` passes.
-- `golangci-lint run ./...` passes.
+- `make test` passes.
+- `make vet` passes.
+- `make lint` passes.
+- `make check` passes.
 - Docs and CLI help text match implementation.
 
 ## Documentation Policy
