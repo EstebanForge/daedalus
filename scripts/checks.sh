@@ -6,6 +6,4 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${REPO_ROOT}"
 
-make test
-make lint
-make build
+exec make check "$@"
