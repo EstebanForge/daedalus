@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt vet test lint build sign build-signed check
+.PHONY: fmt vet test lint build sign build-signed check ci
 
 BINARY_NAME := daedalus
 BINARY_DIR := bin
@@ -67,3 +67,7 @@ check:
 	@echo "==> make build"
 	@$(MAKE) --no-print-directory build
 	@echo "✓ Full checks complete"
+
+ci:
+	@$(MAKE) --no-print-directory check
+	@echo "✓ CI checks passed"
