@@ -28,12 +28,22 @@ type IterationOptions struct {
 	Model          string
 }
 
+type CompletionPolicy struct {
+	PushOnComplete   bool
+	AutoPROnComplete bool
+}
+
 type qualityChecker interface {
 	Run(ctx context.Context, workDir string, commands []string) (quality.Report, error)
 }
 
 type committer interface {
 	CommitStory(ctx context.Context, workDir, storyID, storyTitle string) (daedalusgit.CommitResult, error)
+}
+
+type completionExecutor interface {
+	PushBranch(ctx context.Context, workDir string) error
+	CreatePR(ctx context.Context, workDir string) error
 }
 
 type Manager struct {
@@ -44,6 +54,8 @@ type Manager struct {
 	qualityChecker  qualityChecker
 	qualityCommands []string
 	committer       committer
+	completion      CompletionPolicy
+	completionExec  completionExecutor
 }
 
 func NewManager(
@@ -54,6 +66,8 @@ func NewManager(
 	checker qualityChecker,
 	qualityCommands []string,
 	commitService committer,
+	completionPolicy CompletionPolicy,
+	completionExec completionExecutor,
 ) Manager {
 	if strings.TrimSpace(iteration.ApprovalPolicy) == "" {
 		iteration.ApprovalPolicy = "on-failure"
@@ -73,6 +87,8 @@ func NewManager(
 		qualityChecker:  checker,
 		qualityCommands: qualityCommands,
 		committer:       commitService,
+		completion:      completionPolicy,
+		completionExec:  completionExec,
 	}
 }
 
@@ -154,6 +170,16 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 	}
 	if err := m.store.Save(name, doc); err != nil {
 		return err
+	}
+
+	if m.completion.PushOnComplete && commitResult.Committed && m.completionExec != nil {
+		if pushErr := m.completionExec.PushBranch(ctx, workDir); pushErr != nil {
+			_ = appendAgentLog(artifactDir, name, "[completion] push failed: "+pushErr.Error()+"\n")
+		} else if m.completion.AutoPROnComplete {
+			if prErr := m.completionExec.CreatePR(ctx, workDir); prErr != nil {
+				_ = appendAgentLog(artifactDir, name, "[completion] pr creation failed: "+prErr.Error()+"\n")
+			}
+		}
 	}
 
 	summary := strings.TrimSpace(result.Summary)

@@ -49,6 +49,27 @@ func (Committer) CommitStory(ctx context.Context, workDir, storyID, storyTitle s
 	}, nil
 }
 
+func (Committer) PushBranch(ctx context.Context, workDir string) error {
+	return runGit(ctx, workDir, "push", "-u", "origin", "HEAD")
+}
+
+func (Committer) CreatePR(ctx context.Context, workDir string) error {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "create", "--fill")
+	if strings.TrimSpace(workDir) != "" {
+		cmd.Dir = workDir
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("gh pr create failed: %s", msg)
+	}
+	return nil
+}
+
 func hasChanges(ctx context.Context, workDir string) (bool, error) {
 	out, err := gitOutput(ctx, workDir, "status", "--porcelain")
 	if err != nil {

@@ -218,10 +218,10 @@ Acceptance:
 - [x] All 7 providers implemented: codex, claude, gemini, opencode, copilot, qwen, pi.
 - [x] Shared contract test suite covering all providers.
 
-### M6 ACP migration (in progress)
+### M6 ACP migration ✓
 - [x] ACP provider path added and wired in registry.
 - [x] ACP runtime hardening (polling, streaming, cancellation).
-- [ ] ACP-first integration coverage across native and adapter-backed providers.
+- [x] ACP-first integration coverage across native and adapter-backed providers.
 - [x] Legacy CLI provider cleanup.
 - [x] ACP-first contract coverage and event mapping golden tests.
 

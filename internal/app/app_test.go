@@ -446,3 +446,88 @@ func TestTUILogsViewReadsEventStreamWithFilterAndTail(t *testing.T) {
 		t.Fatalf("expected filtered error event in logs, got: %s", output)
 	}
 }
+
+func TestParseGlobalOptionsPushOnComplete(t *testing.T) {
+	t.Parallel()
+
+	opts, _, err := parseGlobalOptions([]string{"--push-on-complete"})
+	if err != nil {
+		t.Fatalf("parse global options: %v", err)
+	}
+	if !opts.PushOnCompleteSet || !opts.PushOnComplete {
+		t.Fatalf("expected push-on-complete set=true value=true, got set=%v value=%v", opts.PushOnCompleteSet, opts.PushOnComplete)
+	}
+}
+
+func TestParseRunOptionsPushOnComplete(t *testing.T) {
+	t.Parallel()
+
+	opts, err := parseRunOptions([]string{"main", "--push-on-complete"})
+	if err != nil {
+		t.Fatalf("parse run options: %v", err)
+	}
+	if !opts.PushOnCompleteSet || !opts.PushOnComplete {
+		t.Fatalf("expected push-on-complete set=true value=true, got set=%v value=%v", opts.PushOnCompleteSet, opts.PushOnComplete)
+	}
+}
+
+func TestResolveCompletionSettingsDefaultsToFalse(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	result, err := resolveCompletionSettings(cfg, globalOptions{}, runOptions{})
+	if err != nil {
+		t.Fatalf("resolve completion settings: %v", err)
+	}
+	if result.PushOnComplete {
+		t.Fatal("expected push_on_complete false by default")
+	}
+	if result.AutoPROnComplete {
+		t.Fatal("expected auto_pr_on_complete false by default")
+	}
+}
+
+func TestResolveCompletionSettingsEnvOverride(t *testing.T) {
+	t.Setenv("DAEDALUS_PUSH_ON_COMPLETE", "true")
+
+	cfg := config.Defaults()
+	result, err := resolveCompletionSettings(cfg, globalOptions{}, runOptions{})
+	if err != nil {
+		t.Fatalf("resolve completion settings: %v", err)
+	}
+	if !result.PushOnComplete {
+		t.Fatal("expected push_on_complete true from env")
+	}
+}
+
+func TestResolveCompletionSettingsRejectsAutoPRWithoutPush(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	_, err := resolveCompletionSettings(cfg, globalOptions{}, runOptions{
+		AutoPROnComplete:    true,
+		AutoPROnCompleteSet: true,
+	})
+	if err == nil {
+		t.Fatal("expected error when auto-pr-on-complete set without push-on-complete")
+	}
+	if !strings.Contains(err.Error(), "push-on-complete") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveCompletionSettingsFlagOverridesEnv(t *testing.T) {
+	t.Setenv("DAEDALUS_PUSH_ON_COMPLETE", "false")
+
+	cfg := config.Defaults()
+	result, err := resolveCompletionSettings(cfg, globalOptions{}, runOptions{
+		PushOnComplete:    true,
+		PushOnCompleteSet: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve completion settings: %v", err)
+	}
+	if !result.PushOnComplete {
+		t.Fatal("expected run flag to override env var")
+	}
+}

@@ -41,6 +41,52 @@ func TestCommitStorySkipsWhenNoChanges(t *testing.T) {
 	}
 }
 
+func TestPushBranchPushesToBareRemote(t *testing.T) {
+	t.Parallel()
+
+	bareDir := t.TempDir()
+	run(t, bareDir, "git", "init", "--bare")
+
+	workDir := initRepo(t)
+	writeFile(t, filepath.Join(workDir, "init.txt"), "init\n")
+	run(t, workDir, "git", "add", "-A")
+	run(t, workDir, "git", "commit", "-m", "initial commit")
+	run(t, workDir, "git", "remote", "add", "origin", bareDir)
+
+	committer := NewCommitter()
+	if err := committer.PushBranch(context.Background(), workDir); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+}
+
+func TestPushBranchFailsWithNoRemote(t *testing.T) {
+	t.Parallel()
+
+	workDir := initRepo(t)
+	writeFile(t, filepath.Join(workDir, "file.txt"), "content\n")
+	run(t, workDir, "git", "add", "-A")
+	run(t, workDir, "git", "commit", "-m", "initial commit")
+
+	committer := NewCommitter()
+	if err := committer.PushBranch(context.Background(), workDir); err == nil {
+		t.Fatal("expected error when no remote configured")
+	}
+}
+
+func TestCreatePRFailsWhenGhNotFound(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv("PATH", "")
+
+	committer := NewCommitter()
+	err := committer.CreatePR(context.Background(), workDir)
+	if err == nil {
+		t.Fatal("expected error when gh not in PATH")
+	}
+	if err.Error() == "" {
+		t.Fatal("expected non-empty error message")
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 

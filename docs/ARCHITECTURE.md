@@ -269,7 +269,7 @@ Worktree lifecycle and safety rules are specified in:
 - [x] Phase 3: provider contract + registry + quality gates + TUI runtime controls/views.
 - [x] Phase 4: worktree mode + TUI polish/hardening (richer event streaming, stronger pause/stop lifecycle controls, visual/interaction refinement) + docs finalization.
 - [x] Phase 5: remaining provider implementations (including Gemini), multi-provider hardening, and provider-specific optimizations.
-- [ ] Phase 6: ACP migration (unified provider transport via Agent Client Protocol).
+- [x] Phase 6: ACP migration (unified provider transport via Agent Client Protocol).
 
 ## Provider integration notes
 - All providers use ACP (Agent Client Protocol) for communication.
@@ -281,7 +281,7 @@ Worktree lifecycle and safety rules are specified in:
 - See `docs/ACP-migration.md` for detailed migration plan.
 - Core packages must never import provider SDK packages directly.
 - Provider modules absorb API drift and map native output/errors to normalized events.
-- ACP runtime hardening and ACP-first contract coverage are complete; full provider-family integration runs remain in progress.
+- ACP runtime hardening, ACP-first contract coverage, and per-family fixture integration runs are complete.
 
 ### ACP Provider Support Matrix
 

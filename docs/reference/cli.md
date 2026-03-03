@@ -31,11 +31,9 @@ Worktree control:
 - Global: `--worktree` or `--worktree=<bool>`
 - Run command: `daedalus run [name] --worktree` or `--worktree=<bool>`
 
-## Planned global flags (proposal alignment)
-- `--push-on-complete` / `--push-on-complete=<bool>`
-- `--auto-pr-on-complete` / `--auto-pr-on-complete=<bool>`
-
-These map to post-completion defaults and are intentionally outside onboarding.
+Completion control:
+- `--push-on-complete` / `--push-on-complete=<bool>` — push branch after story commit
+- `--auto-pr-on-complete` / `--auto-pr-on-complete=<bool>` — create PR after push (requires `--push-on-complete`)
 
 ## Commands
 
@@ -93,6 +91,8 @@ Behavior:
 - Worktree mode can be enabled via `--worktree`, `DAEDALUS_WORKTREE`, or `[worktree].enabled`.
 - In worktree mode, execution runs in `.daedalus/worktrees/<name>/` on branch `daedalus/<name>`.
 - Quality commands are loaded from `[quality].commands` and all must pass.
+- After a successful commit, `--push-on-complete` runs `git push -u origin HEAD` (non-fatal on error).
+- `--auto-pr-on-complete` additionally runs `gh pr create --fill` after push (non-fatal on error).
 
 ### `daedalus new [name] [context...]`
 Create a PRD scaffold under `.daedalus/prds/<name>/`.

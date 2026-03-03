@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,6 +92,8 @@ func TestRunOnceFailsWhenQualityChecksFail(t *testing.T) {
 		fakeChecker{report: quality.Report{Passed: false}},
 		[]string{"go test ./..."},
 		fakeCommitter{},
+		CompletionPolicy{},
+		nil,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err == nil {
@@ -115,6 +118,8 @@ func TestRunOnceSucceedsWhenQualityChecksPass(t *testing.T) {
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
+		CompletionPolicy{},
+		nil,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -154,6 +159,8 @@ func TestRunOnceWritesProviderEventsToArtifacts(t *testing.T) {
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -205,6 +212,8 @@ func TestRunOnceUsesSeparateArtifactAndExecutionDirs(t *testing.T) {
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", artifactDir, execDir); err != nil {
@@ -250,6 +259,8 @@ func TestRunOncePersistsQualityCommandDetails(t *testing.T) {
 		}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -325,6 +336,8 @@ func TestRunOnceBuildsPromptAndContextFiles(t *testing.T) {
 		fakeChecker{report: quality.Report{Passed: true}},
 		[]string{"go test ./..."},
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", artifactDir, execDir); err != nil {
@@ -358,5 +371,191 @@ func TestRunOnceBuildsPromptAndContextFiles(t *testing.T) {
 	}
 	if !strings.Contains(contextJoined, "README.md") {
 		t.Fatalf("expected README.md context file, got: %v", gotRequest.ContextFiles)
+	}
+}
+
+type fakeCompletionExecutor struct {
+	pushCalled int
+	prCalled   int
+	pushErr    error
+	prErr      error
+}
+
+func (e *fakeCompletionExecutor) PushBranch(_ context.Context, _ string) error {
+	e.pushCalled++
+	return e.pushErr
+}
+
+func (e *fakeCompletionExecutor) CreatePR(_ context.Context, _ string) error {
+	e.prCalled++
+	return e.prErr
+}
+
+func TestRunOnceCallsPushWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	exec := &fakeCompletionExecutor{}
+	manager := NewManager(
+		store,
+		fakeProvider{},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
+		CompletionPolicy{PushOnComplete: true},
+		exec,
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if exec.pushCalled != 1 {
+		t.Fatalf("expected push to be called once, got %d", exec.pushCalled)
+	}
+	if exec.prCalled != 0 {
+		t.Fatalf("expected PR creation not to be called, got %d", exec.prCalled)
+	}
+}
+
+func TestRunOnceCallsPRAfterPush(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	exec := &fakeCompletionExecutor{}
+	manager := NewManager(
+		store,
+		fakeProvider{},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
+		CompletionPolicy{PushOnComplete: true, AutoPROnComplete: true},
+		exec,
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if exec.pushCalled != 1 {
+		t.Fatalf("expected push to be called once, got %d", exec.pushCalled)
+	}
+	if exec.prCalled != 1 {
+		t.Fatalf("expected PR creation to be called once, got %d", exec.prCalled)
+	}
+}
+
+func TestRunOnceSkipsPushWhenNoCommit(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	exec := &fakeCompletionExecutor{}
+	manager := NewManager(
+		store,
+		fakeProvider{},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{PushOnComplete: true, AutoPROnComplete: true},
+		exec,
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if exec.pushCalled != 0 {
+		t.Fatalf("expected push not to be called when no commit, got %d", exec.pushCalled)
+	}
+}
+
+func TestRunOncePushFailureDoesNotFailStory(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	exec := &fakeCompletionExecutor{pushErr: fmt.Errorf("remote unreachable")}
+	manager := NewManager(
+		store,
+		fakeProvider{},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
+		CompletionPolicy{PushOnComplete: true, AutoPROnComplete: true},
+		exec,
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("push failure must not fail the story, got: %v", err)
+	}
+
+	doc, err := store.Load("main")
+	if err != nil {
+		t.Fatalf("load PRD: %v", err)
+	}
+	if !doc.UserStories[0].Passes {
+		t.Fatal("expected story to be marked as passed despite push failure")
+	}
+
+	agentLog, err := os.ReadFile(project.PRDAgentLogPath(baseDir, "main"))
+	if err != nil {
+		t.Fatalf("read agent log: %v", err)
+	}
+	if !strings.Contains(string(agentLog), "[completion] push failed") {
+		t.Fatalf("expected push failure in agent log, got: %s", string(agentLog))
+	}
+}
+
+func TestRunOnceSkipsCompletionWhenPolicyDisabled(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	exec := &fakeCompletionExecutor{}
+	manager := NewManager(
+		store,
+		fakeProvider{},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
+		CompletionPolicy{},
+		exec,
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if exec.pushCalled != 0 {
+		t.Fatalf("expected push not to be called with default policy, got %d", exec.pushCalled)
 	}
 }

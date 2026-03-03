@@ -110,6 +110,55 @@ func TestLoadAppliesFallbackForUITheme(t *testing.T) {
 	}
 }
 
+func TestCompletionDefaultsAreFalse(t *testing.T) {
+	t.Parallel()
+
+	cfg := Defaults()
+	if cfg.Completion.PushOnComplete {
+		t.Fatal("expected push_on_complete to default to false")
+	}
+	if cfg.Completion.AutoPROnComplete {
+		t.Fatal("expected auto_pr_on_complete to default to false")
+	}
+}
+
+func TestLoadAppliesCompletionFromTOML(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := "[provider]\ndefault = \"codex\"\n\n[retry]\nmax_retries = 1\ndelays = [\"0s\"]\n\n[quality]\ncommands = [\"go test ./...\"]\n\n[completion]\npush_on_complete = true\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Completion.PushOnComplete {
+		t.Fatal("expected push_on_complete to be true")
+	}
+	if cfg.Completion.AutoPROnComplete {
+		t.Fatal("expected auto_pr_on_complete to remain false")
+	}
+}
+
+func TestValidateRejectsAutoPRWithoutPush(t *testing.T) {
+	t.Parallel()
+
+	cfg := Defaults()
+	cfg.Completion.AutoPROnComplete = true
+	cfg.Completion.PushOnComplete = false
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "auto_pr_on_complete") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadReadsProviderACPCommand(t *testing.T) {
 	t.Parallel()
 

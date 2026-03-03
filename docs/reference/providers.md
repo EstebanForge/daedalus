@@ -130,5 +130,5 @@ Config may override ACP command per provider via `[providers.<key>].acp_command`
 - [x] ACP provider contract tests for active runtime path.
 - [x] Event mapping golden tests.
 - [x] Env-gated real-provider integration test scaffolding.
-- [ ] One fixture integration run per provider family (native + adapter-backed).
+- [x] One fixture integration run per provider family (native + adapter-backed).
 - [x] Cancellation/shutdown behavior tests under retry conditions.

@@ -89,6 +89,9 @@ func TestResolveACPCommandDefaults(t *testing.T) {
 		{provider: "claude", binary: "claude-agent-acp"},
 		{provider: "pi", binary: "pi-acp"},
 		{provider: "gemini", binary: "gemini", args: []string{"acp"}},
+		{provider: "opencode", binary: "opencode", args: []string{"acp"}},
+		{provider: "qwen", binary: "qwen", args: []string{"acp"}},
+		{provider: "copilot", binary: "copilot", args: []string{"acp"}},
 	}
 
 	for _, tc := range cases {
@@ -362,7 +365,8 @@ func TestACPHelperProcess(t *testing.T) {
 		mode != "acp-error-helper" &&
 		mode != "acp-resume-helper" &&
 		mode != "acp-no-resume-helper" &&
-		mode != "acp-capabilities-helper" {
+		mode != "acp-capabilities-helper" &&
+		mode != "acp-echo-helper" {
 		os.Exit(2)
 	}
 
@@ -459,6 +463,20 @@ func runACPHelperServer(mode string) {
 				Result:  mustMarshalJSON(acpSessionResult{SessionID: resumeID}),
 			})
 		case "session/prompt":
+			if mode == "acp-echo-helper" {
+				var params acpPromptParams
+				_ = json.Unmarshal(req.Params, &params)
+				var promptText strings.Builder
+				for _, block := range params.Prompt {
+					promptText.WriteString(block.Text)
+				}
+				writeRPC(writer, acpJSONRPC{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Result:  mustMarshalJSON(acpPromptResult{StopReason: "end_turn", Output: []acpContentBlock{{Type: "text", Text: promptText.String()}}}),
+				})
+				continue
+			}
 			if mode == "acp-error-helper" {
 				writeRPC(writer, acpJSONRPC{
 					JSONRPC: "2.0",

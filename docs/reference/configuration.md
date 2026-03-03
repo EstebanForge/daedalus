@@ -61,14 +61,12 @@ enabled = false
 enabled = false
 ```
 
-## Planned extension example (workflow proposal v1.4)
+## Completion extension (implemented)
 ```toml
 [completion]
 push_on_complete = false
 auto_pr_on_complete = false
 ```
-
-`[completion]` is documented for workflow alignment but is not implemented in current scaffold.
 
 ## Fields (implemented)
 
@@ -143,17 +141,15 @@ ACP command notes:
 - Empty `acp_command` uses provider runtime defaults.
 - Set this for any provider when the command/binary differs from runtime defaults.
 
-## Planned fields (not implemented)
-
 ### `[completion]`
 - `push_on_complete: bool`
-  - Default: `false`
+  - After a story is committed, runs `git push -u origin HEAD`.
+  - Default: `false`.
 - `auto_pr_on_complete: bool`
-  - Default: `false`
-
-Purpose:
-- Controls post-completion push/PR automation through config and flags.
-- Kept out of onboarding screens.
+  - After push, runs `gh pr create --fill`. Requires `push_on_complete = true`.
+  - Default: `false`.
+- Failures are non-fatal: the story remains passed; errors are logged to the agent log.
+- No push occurs when there is no commit (`commitResult.Committed = false`).
 
 ## CLI overrides (implemented)
 Global flags:
@@ -174,9 +170,9 @@ Boolean values for `--worktree`:
 - true: `1`, `true`, `yes`, `on`
 - false: `0`, `false`, `no`, `off`
 
-## CLI overrides (planned)
-- `--push-on-complete` or `--push-on-complete=<bool>`
-- `--auto-pr-on-complete` or `--auto-pr-on-complete=<bool>`
+Run command also supports:
+- `daedalus run [name] --push-on-complete` or `--push-on-complete=<bool>`
+- `daedalus run [name] --auto-pr-on-complete` or `--auto-pr-on-complete=<bool>`
 
 ## Environment overrides (implemented)
 - `DAEDALUS_CONFIG`
@@ -186,7 +182,6 @@ Boolean values for `--worktree`:
 - `DAEDALUS_RETRY_DELAYS`
 - `DAEDALUS_THEME` (`dark` or `light`)
 
-## Environment overrides (planned)
 - `DAEDALUS_PUSH_ON_COMPLETE`
 - `DAEDALUS_AUTO_PR_ON_COMPLETE`
 
@@ -198,6 +193,4 @@ Boolean values for `--worktree`:
 - `quality.commands` must contain at least one non-empty command.
 - `ui.theme` must be one of `auto`, `dark`, `light`.
 - Selected provider key must resolve to a registered and enabled provider.
-
-## Validation rules (planned)
-- `completion.auto_pr_on_complete=true` should require `completion.push_on_complete=true`.
+- `completion.auto_pr_on_complete=true` requires `completion.push_on_complete=true`.

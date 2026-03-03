@@ -340,28 +340,36 @@ func (c *loopController) checkRequests() (pause bool, stop bool) {
 }
 
 type globalOptions struct {
-	ConfigPath     string
-	Provider       string
-	ProviderSet    bool
-	Worktree       bool
-	WorktreeSet    bool
-	MaxRetries     int
-	MaxRetriesSet  bool
-	RetryDelays    []string
-	RetryDelaysSet bool
+	ConfigPath          string
+	Provider            string
+	ProviderSet         bool
+	Worktree            bool
+	WorktreeSet         bool
+	MaxRetries          int
+	MaxRetriesSet       bool
+	RetryDelays         []string
+	RetryDelaysSet      bool
+	PushOnComplete      bool
+	PushOnCompleteSet   bool
+	AutoPROnComplete    bool
+	AutoPROnCompleteSet bool
 }
 
 type runOptions struct {
 	Name string
 
-	Provider       string
-	ProviderSet    bool
-	Worktree       bool
-	WorktreeSet    bool
-	MaxRetries     int
-	MaxRetriesSet  bool
-	RetryDelays    []string
-	RetryDelaysSet bool
+	Provider            string
+	ProviderSet         bool
+	Worktree            bool
+	WorktreeSet         bool
+	MaxRetries          int
+	MaxRetriesSet       bool
+	RetryDelays         []string
+	RetryDelaysSet      bool
+	PushOnComplete      bool
+	PushOnCompleteSet   bool
+	AutoPROnComplete    bool
+	AutoPROnCompleteSet bool
 }
 
 func New(version string) App {
@@ -711,10 +719,19 @@ func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, gl
 		a.writef("Using worktree %q on branch %q.\n", setupResult.Path, setupResult.Branch)
 	}
 
+	completionCfg, err := resolveCompletionSettings(cfg, global, run)
+	if err != nil {
+		return err
+	}
+
 	manager := loop.NewManager(store, provider, loop.RetryPolicy{
 		MaxRetries: maxRetries,
 		Delays:     retryDelays,
-	}, resolveIterationOptions(cfg, provider.Name()), quality.NewRunner(), cfg.Quality.Commands, daedalusgit.NewCommitter())
+	}, resolveIterationOptions(cfg, provider.Name()), quality.NewRunner(), cfg.Quality.Commands, daedalusgit.NewCommitter(),
+		loop.CompletionPolicy{
+			PushOnComplete:   completionCfg.PushOnComplete,
+			AutoPROnComplete: completionCfg.AutoPROnComplete,
+		}, daedalusgit.NewCommitter())
 	if err := manager.RunOnce(ctx, name, baseDir, execDir); err != nil {
 		return err
 	}
@@ -727,7 +744,16 @@ func (a App) printHelp() {
 	a.writeLine("Daedalus - Codex-native autonomous delivery loop")
 	a.writeLine("")
 	a.writeLine("Usage:")
-	a.writeLine("  daedalus [--config <path>] [--provider <name>] [--worktree[=<bool>]] [--max-retries <n>] [--retry-delays <csv>] [command]")
+	a.writeLine("  daedalus [global flags] [command] [command flags]")
+	a.writeLine("")
+	a.writeLine("Global flags:")
+	a.writeLine("  --config <path>                  Config file path")
+	a.writeLine("  --provider <name>                Override provider")
+	a.writeLine("  --worktree[=<bool>]              Enable/disable worktree mode")
+	a.writeLine("  --max-retries <n>                Max iteration retries")
+	a.writeLine("  --retry-delays <csv>             Retry delay durations (e.g. 0s,5s,15s)")
+	a.writeLine("  --push-on-complete[=<bool>]      Push branch after story commit")
+	a.writeLine("  --auto-pr-on-complete[=<bool>]   Create PR after push (requires --push-on-complete)")
 	a.writeLine("")
 	a.writeLine("Commands:")
 	a.writeLine("  new [name]          Create a PRD scaffold")
@@ -1389,6 +1415,20 @@ func parseGlobalOptions(args []string) (globalOptions, []string, error) {
 			}
 			options.RetryDelays = parseCSV(value)
 			options.RetryDelaysSet = true
+		case "push-on-complete":
+			flagValue, parseErr := parseOptionalBoolFlag("push-on-complete", value, hasValue)
+			if parseErr != nil {
+				return globalOptions{}, nil, parseErr
+			}
+			options.PushOnComplete = flagValue
+			options.PushOnCompleteSet = true
+		case "auto-pr-on-complete":
+			flagValue, parseErr := parseOptionalBoolFlag("auto-pr-on-complete", value, hasValue)
+			if parseErr != nil {
+				return globalOptions{}, nil, parseErr
+			}
+			options.AutoPROnComplete = flagValue
+			options.AutoPROnCompleteSet = true
 		default:
 			return globalOptions{}, nil, fmt.Errorf("unknown global flag: --%s", key)
 		}
@@ -1458,6 +1498,20 @@ func parseRunOptions(args []string) (runOptions, error) {
 			}
 			options.RetryDelays = parseCSV(value)
 			options.RetryDelaysSet = true
+		case "push-on-complete":
+			flagValue, parseErr := parseOptionalBoolFlag("push-on-complete", value, hasValue)
+			if parseErr != nil {
+				return runOptions{}, parseErr
+			}
+			options.PushOnComplete = flagValue
+			options.PushOnCompleteSet = true
+		case "auto-pr-on-complete":
+			flagValue, parseErr := parseOptionalBoolFlag("auto-pr-on-complete", value, hasValue)
+			if parseErr != nil {
+				return runOptions{}, parseErr
+			}
+			options.AutoPROnComplete = flagValue
+			options.AutoPROnCompleteSet = true
 		default:
 			return runOptions{}, fmt.Errorf("unknown run flag: --%s", key)
 		}
@@ -1586,6 +1640,43 @@ func resolveRuntimeSettings(cfg config.Config, global globalOptions, run runOpti
 	}
 
 	return providerName, maxRetries, retryDelays, useWorktree, nil
+}
+
+func resolveCompletionSettings(cfg config.Config, global globalOptions, run runOptions) (config.CompletionConfig, error) {
+	push := cfg.Completion.PushOnComplete
+	if env := os.Getenv("DAEDALUS_PUSH_ON_COMPLETE"); env != "" {
+		parsed, err := parseBool(env)
+		if err != nil {
+			return config.CompletionConfig{}, fmt.Errorf("DAEDALUS_PUSH_ON_COMPLETE: %w", err)
+		}
+		push = parsed
+	}
+	if global.PushOnCompleteSet {
+		push = global.PushOnComplete
+	}
+	if run.PushOnCompleteSet {
+		push = run.PushOnComplete
+	}
+
+	autoPR := cfg.Completion.AutoPROnComplete
+	if env := os.Getenv("DAEDALUS_AUTO_PR_ON_COMPLETE"); env != "" {
+		parsed, err := parseBool(env)
+		if err != nil {
+			return config.CompletionConfig{}, fmt.Errorf("DAEDALUS_AUTO_PR_ON_COMPLETE: %w", err)
+		}
+		autoPR = parsed
+	}
+	if global.AutoPROnCompleteSet {
+		autoPR = global.AutoPROnComplete
+	}
+	if run.AutoPROnCompleteSet {
+		autoPR = run.AutoPROnComplete
+	}
+
+	if autoPR && !push {
+		return config.CompletionConfig{}, fmt.Errorf("--auto-pr-on-complete requires --push-on-complete")
+	}
+	return config.CompletionConfig{PushOnComplete: push, AutoPROnComplete: autoPR}, nil
 }
 
 func resolveIterationOptions(cfg config.Config, providerName string) loop.IterationOptions {

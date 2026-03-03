@@ -12,12 +12,18 @@ import (
 )
 
 type Config struct {
-	Provider  ProviderConfig  `toml:"provider"`
-	Retry     RetryConfig     `toml:"retry"`
-	Quality   QualityConfig   `toml:"quality"`
-	Worktree  WorktreeConfig  `toml:"worktree"`
-	UI        UIConfig        `toml:"ui"`
-	Providers ProvidersConfig `toml:"providers"`
+	Provider   ProviderConfig   `toml:"provider"`
+	Retry      RetryConfig      `toml:"retry"`
+	Quality    QualityConfig    `toml:"quality"`
+	Worktree   WorktreeConfig   `toml:"worktree"`
+	UI         UIConfig         `toml:"ui"`
+	Providers  ProvidersConfig  `toml:"providers"`
+	Completion CompletionConfig `toml:"completion"`
+}
+
+type CompletionConfig struct {
+	PushOnComplete   bool `toml:"push_on_complete"`
+	AutoPROnComplete bool `toml:"auto_pr_on_complete"`
 }
 
 type ProviderConfig struct {
@@ -90,6 +96,10 @@ func Defaults() Config {
 			Gemini: GenericProviderConfig{
 				Enabled: false,
 			},
+		},
+		Completion: CompletionConfig{
+			PushOnComplete:   false,
+			AutoPROnComplete: false,
 		},
 	}
 }
@@ -172,6 +182,10 @@ func Validate(cfg Config) error {
 	case "auto", "dark", "light":
 	default:
 		return fmt.Errorf("ui.theme must be one of: auto, dark, light")
+	}
+
+	if cfg.Completion.AutoPROnComplete && !cfg.Completion.PushOnComplete {
+		return fmt.Errorf("completion.auto_pr_on_complete requires completion.push_on_complete to be enabled")
 	}
 
 	return nil

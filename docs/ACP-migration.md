@@ -1,8 +1,8 @@
 # ACP Migration Plan
 
-> **Status:** In Progress
+> **Status:** Complete
 > **Created:** 2026-02-26
-> **Last Updated:** 2026-03-01
+> **Last Updated:** 2026-03-02
 > **Target:** Daedalus v2.0
 
 ## Summary
@@ -104,8 +104,8 @@ ACP Provider
 
 - [x] ACP provider contract tests (active runtime path)
 - [x] Event mapping golden tests
-- [ ] Integration runs for native ACP providers (OpenCode, Gemini, Qwen)
-- [ ] Adapter-backed integration runs (Codex, Claude, Pi)
+- [x] Integration runs for native ACP providers (OpenCode, Gemini, Qwen)
+- [x] Adapter-backed integration runs (Codex, Claude, Pi)
 - [x] Add env-gated integration test scaffolding for real providers
 - [x] Error mapping and cancellation tests
 
