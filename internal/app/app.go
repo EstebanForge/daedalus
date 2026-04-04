@@ -724,6 +724,12 @@ func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, gl
 		return err
 	}
 
+	// Build reviewer if review is enabled.
+	var reviewer quality.Reviewer
+	if cfg.Review.Enabled && len(cfg.Review.Perspectives) > 0 {
+		reviewer = quality.NewParallelReviewer(provider)
+	}
+
 	manager := loop.NewManager(store, provider, loop.RetryPolicy{
 		MaxRetries: maxRetries,
 		Delays:     retryDelays,
@@ -731,7 +737,12 @@ func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, gl
 		loop.CompletionPolicy{
 			PushOnComplete:   completionCfg.PushOnComplete,
 			AutoPROnComplete: completionCfg.AutoPROnComplete,
-		}, daedalusgit.NewCommitter())
+		}, daedalusgit.NewCommitter(),
+		cfg.Plan.Enabled,
+		reviewer,
+		cfg.Review.Perspectives,
+		cfg.Compound.Enabled,
+	)
 	if err := manager.RunOnce(ctx, name, baseDir, execDir); err != nil {
 		return err
 	}

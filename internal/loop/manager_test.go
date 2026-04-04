@@ -94,6 +94,10 @@ func TestRunOnceFailsWhenQualityChecksFail(t *testing.T) {
 		fakeCommitter{},
 		CompletionPolicy{},
 		nil,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err == nil {
@@ -120,6 +124,10 @@ func TestRunOnceSucceedsWhenQualityChecksPass(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
 		CompletionPolicy{},
 		nil,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -161,6 +169,10 @@ func TestRunOnceWritesProviderEventsToArtifacts(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
 		CompletionPolicy{},
 		nil,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -214,6 +226,10 @@ func TestRunOnceUsesSeparateArtifactAndExecutionDirs(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
 		CompletionPolicy{},
 		nil,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", artifactDir, execDir); err != nil {
@@ -261,6 +277,10 @@ func TestRunOncePersistsQualityCommandDetails(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
 		CompletionPolicy{},
 		nil,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -338,6 +358,10 @@ func TestRunOnceBuildsPromptAndContextFiles(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
 		CompletionPolicy{},
 		nil,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", artifactDir, execDir); err != nil {
@@ -411,6 +435,10 @@ func TestRunOnceCallsPushWhenConfigured(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
 		CompletionPolicy{PushOnComplete: true},
 		exec,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -444,6 +472,10 @@ func TestRunOnceCallsPRAfterPush(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
 		CompletionPolicy{PushOnComplete: true, AutoPROnComplete: true},
 		exec,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -477,6 +509,10 @@ func TestRunOnceSkipsPushWhenNoCommit(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
 		CompletionPolicy{PushOnComplete: true, AutoPROnComplete: true},
 		exec,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -507,6 +543,10 @@ func TestRunOncePushFailureDoesNotFailStory(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
 		CompletionPolicy{PushOnComplete: true, AutoPROnComplete: true},
 		exec,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -550,6 +590,10 @@ func TestRunOnceSkipsCompletionWhenPolicyDisabled(t *testing.T) {
 		fakeCommitter{result: daedalusgit.CommitResult{Committed: true, CommitSHA: "abc123"}},
 		CompletionPolicy{},
 		exec,
+		false,
+		nil,
+		nil,
+		false,
 	)
 
 	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
@@ -558,4 +602,320 @@ func TestRunOnceSkipsCompletionWhenPolicyDisabled(t *testing.T) {
 	if exec.pushCalled != 0 {
 		t.Fatalf("expected push not to be called with default policy, got %d", exec.pushCalled)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compound Engineering Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestPlanPhaseWritesPlanFile(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	planText := "## Implementation Plan\n\nObjective: Do the thing.\n"
+	var planRequest providers.IterationRequest
+	manager := NewManager(
+		store,
+		fakeProvider{
+			gotRequest: &planRequest,
+			events: []providers.Event{
+				{Type: providers.EventAssistantText, Message: planText},
+			},
+		},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
+		true,  // planEnabled
+		nil,   // reviewer
+		nil,   // reviewPerspectives
+		false, // compoundEnabled
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	// Check plan file was written
+	planPath := project.PRDPlanPath(baseDir, "main", "US-001")
+	data, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("expected plan file at %s, got error: %v", planPath, err)
+	}
+	if !strings.Contains(string(data), "Implementation Plan") {
+		t.Fatalf("expected plan content, got: %s", string(data))
+	}
+
+	// Check plan file was included in the work request context
+	if !strings.Contains(strings.Join(planRequest.ContextFiles, "\n"), "plans/US-001.md") {
+		t.Fatalf("expected plan file in work context, got: %v", planRequest.ContextFiles)
+	}
+}
+
+func TestPlanPhaseSkippedWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	var workRequest providers.IterationRequest
+	manager := NewManager(
+		store,
+		fakeProvider{
+			gotRequest: &workRequest,
+			events: []providers.Event{
+				{Type: providers.EventAssistantText, Message: "done"},
+			},
+		},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
+		false, // planEnabled = false
+		nil,
+		nil,
+		false,
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	// No plan file should exist
+	planPath := project.PRDPlanPath(baseDir, "main", "US-1")
+	if _, err := os.Stat(planPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no plan file, got: %v", err)
+	}
+
+	// Work request should not have a plan phase marker
+	if strings.Contains(workRequest.Prompt, "Senior engineer creating an implementation plan") {
+		t.Fatal("expected no plan prompt in work phase when plan is disabled")
+	}
+}
+
+func TestCompoundLearningsAppendedOnFailure(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	manager := NewManager(
+		store,
+		fakeProvider{events: []providers.Event{{Type: providers.EventAssistantText, Message: "done"}}},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: false}},
+		[]string{"go test ./..."},
+		fakeCommitter{},
+		CompletionPolicy{},
+		nil,
+		false, // planEnabled
+		nil,   // reviewer
+		nil,   // reviewPerspectives
+		true,  // compoundEnabled
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err == nil {
+		t.Fatal("expected quality failure error")
+	}
+
+	// Check learnings file was created
+	learningsPath := project.PRDLearningsPath(baseDir, "main")
+	data, err := os.ReadFile(learningsPath)
+	if err != nil {
+		t.Fatalf("expected learnings file, got error: %v", err)
+	}
+	if !strings.Contains(string(data), "US-001") {
+		t.Fatalf("expected story ID in learnings, got: %s", string(data))
+	}
+	if !strings.Contains(string(data), "quality") {
+		t.Fatalf("expected phase in learnings, got: %s", string(data))
+	}
+}
+
+func TestCompoundLearningsSkippedWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	manager := NewManager(
+		store,
+		fakeProvider{events: []providers.Event{{Type: providers.EventAssistantText, Message: "done"}}},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: false}},
+		[]string{"go test ./..."},
+		fakeCommitter{},
+		CompletionPolicy{},
+		nil,
+		false, // planEnabled
+		nil,   // reviewer
+		nil,   // reviewPerspectives
+		false, // compoundEnabled = false
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err == nil {
+		t.Fatal("expected quality failure error")
+	}
+
+	// No learnings file should exist
+	learningsPath := project.PRDLearningsPath(baseDir, "main")
+	if _, err := os.Stat(learningsPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no learnings file when disabled, got: %v", err)
+	}
+}
+
+func TestCompoundLearningsInjectedIntoContext(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	// Pre-populate learnings file
+	learningsPath := project.PRDLearningsPath(baseDir, "main")
+	if err := os.WriteFile(learningsPath, []byte("## Previous Learning\n\nAvoid X because Y.\n"), 0o644); err != nil {
+		t.Fatalf("write learnings: %v", err)
+	}
+
+	var workRequest providers.IterationRequest
+	manager := NewManager(
+		store,
+		fakeProvider{
+			gotRequest: &workRequest,
+			events: []providers.Event{
+				{Type: providers.EventAssistantText, Message: "done"},
+			},
+		},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
+		false, // planEnabled
+		nil,   // reviewer
+		nil,   // reviewPerspectives
+		true,  // compoundEnabled
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	// Check learnings file was included in work context
+	contextJoined := strings.Join(workRequest.ContextFiles, "\n")
+	if !strings.Contains(contextJoined, "learnings.md") {
+		t.Fatalf("expected learnings.md in context, got: %v", workRequest.ContextFiles)
+	}
+}
+
+type fakeReviewer struct {
+	calls int
+}
+
+func (r *fakeReviewer) RunReview(_ context.Context, _ string, _ []string, _ []string, _ providers.IterationRequest) (quality.ReviewReport, error) {
+	r.calls++
+	return quality.ReviewReport{Passed: true}, nil
+}
+
+func TestParallelReviewCalledAfterWork(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	reviewer := &fakeReviewer{}
+	manager := NewManager(
+		store,
+		fakeProvider{events: []providers.Event{{Type: providers.EventAssistantText, Message: "done"}}},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
+		false, // planEnabled
+		reviewer,
+		[]string{"security", "performance"},
+		false, // compoundEnabled
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	if reviewer.calls == 0 {
+		t.Fatal("expected reviewer to be called at least once")
+	}
+}
+
+func TestParallelReviewFailureFailsStory(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	store := prd.NewStore(baseDir)
+	if err := store.Create("main"); err != nil {
+		t.Fatalf("create PRD: %v", err)
+	}
+
+	badReviewer := &failingReviewer{}
+	manager := NewManager(
+		store,
+		fakeProvider{events: []providers.Event{{Type: providers.EventAssistantText, Message: "done"}}},
+		RetryPolicy{MaxRetries: 0, Delays: []time.Duration{0}},
+		IterationOptions{},
+		fakeChecker{report: quality.Report{Passed: true}},
+		[]string{"go test ./..."},
+		fakeCommitter{result: daedalusgit.CommitResult{Committed: false}},
+		CompletionPolicy{},
+		nil,
+		false, // planEnabled
+		badReviewer,
+		[]string{"security"},
+		false,
+	)
+
+	if err := manager.RunOnce(context.Background(), "main", baseDir, baseDir); err == nil {
+		t.Fatal("expected review failure error")
+	}
+}
+
+type failingReviewer struct{}
+
+func (r *failingReviewer) RunReview(_ context.Context, _ string, _ []string, _ []string, _ providers.IterationRequest) (quality.ReviewReport, error) {
+	return quality.ReviewReport{
+		Passed: false,
+		Reviews: []providers.PerspectiveReview{
+			{Perspective: "security", Findings: []string{"hardcoded secret found"}},
+		},
+	}, nil
 }

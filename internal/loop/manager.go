@@ -47,15 +47,19 @@ type completionExecutor interface {
 }
 
 type Manager struct {
-	store           prd.Store
-	provider        providers.Provider
-	retry           RetryPolicy
-	iteration       IterationOptions
-	qualityChecker  qualityChecker
-	qualityCommands []string
-	committer       committer
-	completion      CompletionPolicy
-	completionExec  completionExecutor
+	store              prd.Store
+	provider           providers.Provider
+	retry              RetryPolicy
+	iteration          IterationOptions
+	qualityChecker     qualityChecker
+	qualityCommands    []string
+	committer          committer
+	completion         CompletionPolicy
+	completionExec     completionExecutor
+	planEnabled        bool
+	reviewer           quality.Reviewer
+	reviewPerspectives []string
+	compoundEnabled    bool
 }
 
 func NewManager(
@@ -68,6 +72,10 @@ func NewManager(
 	commitService committer,
 	completionPolicy CompletionPolicy,
 	completionExec completionExecutor,
+	planEnabled bool,
+	reviewer quality.Reviewer,
+	reviewPerspectives []string,
+	compoundEnabled bool,
 ) Manager {
 	if strings.TrimSpace(iteration.ApprovalPolicy) == "" {
 		iteration.ApprovalPolicy = "on-failure"
@@ -80,15 +88,19 @@ func NewManager(
 	}
 
 	return Manager{
-		store:           store,
-		provider:        provider,
-		retry:           retry,
-		iteration:       iteration,
-		qualityChecker:  checker,
-		qualityCommands: qualityCommands,
-		committer:       commitService,
-		completion:      completionPolicy,
-		completionExec:  completionExec,
+		store:              store,
+		provider:           provider,
+		retry:              retry,
+		iteration:          iteration,
+		qualityChecker:     checker,
+		qualityCommands:    qualityCommands,
+		committer:          commitService,
+		completion:         completionPolicy,
+		completionExec:     completionExec,
+		planEnabled:        planEnabled,
+		reviewer:           reviewer,
+		reviewPerspectives: reviewPerspectives,
+		compoundEnabled:    compoundEnabled,
 	}
 }
 
@@ -118,11 +130,38 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 		}
 	}
 
+	// Build base context, optionally injecting learnings.
+	contextFiles := m.buildContextFiles(artifactDir, workDir, name)
+	if m.compoundEnabled {
+		contextFiles = m.injectLearnings(contextFiles, artifactDir, name)
+	}
+
+	// ── PHASE 1: Plan (optional) ──────────────────────────────────────────────
+	var planPath string
+	if m.planEnabled {
+		planPath, err = m.runPlanPhase(ctx, artifactDir, workDir, name, doc, *story, contextFiles)
+		if err != nil {
+			_ = appendProgress(artifactDir, name, storyID, "error", "plan phase failed: "+err.Error())
+			return fmt.Errorf("plan phase failed: %w", err)
+		}
+		// Re-read learnings after plan in case the agent added any.
+		if m.compoundEnabled {
+			contextFiles = m.buildContextFiles(artifactDir, workDir, name)
+			contextFiles = m.injectLearnings(contextFiles, artifactDir, name)
+		}
+	}
+
+	// Inject plan file into work context if it exists.
+	if planPath != "" {
+		contextFiles = append(contextFiles, planPath)
+	}
+
+	// ── PHASE 2: Work ─────────────────────────────────────────────────────────
 	prompt := buildStoryPrompt(doc, *story)
 	request := providers.IterationRequest{
 		WorkDir:        workDir,
 		Prompt:         prompt,
-		ContextFiles:   buildContextFiles(artifactDir, workDir, name),
+		ContextFiles:   contextFiles,
 		ApprovalPolicy: m.iteration.ApprovalPolicy,
 		SandboxPolicy:  m.iteration.SandboxPolicy,
 		Model:          m.iteration.Model,
@@ -134,9 +173,29 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 	result, iterationAttempt, err := m.runIterationWithRetry(ctx, artifactDir, name, request)
 	if err != nil {
 		_ = appendProgress(artifactDir, name, storyID, "error", result.Summary)
+		_ = m.appendLearnings(artifactDir, name, storyID, "work", err.Error())
 		return fmt.Errorf("iteration failed: %w", err)
 	}
 
+	// ── PHASE 3: Parallel Review (optional) ───────────────────────────────────
+	if m.reviewer != nil && len(m.reviewPerspectives) > 0 {
+		reviewReport, reviewErr := m.reviewer.RunReview(ctx, workDir, contextFiles, m.reviewPerspectives, request)
+		if reviewErr != nil {
+			_ = appendAgentLog(artifactDir, name, "[review] error: "+reviewErr.Error()+"\n")
+		}
+		summary := providers.SynthesizeReviewSummary(reviewReport.Reviews)
+		if summary != "" {
+			_ = appendAgentLog(artifactDir, name, "[review] summary:\n"+summary+"\n")
+		}
+		// If review found issues, treat as a quality failure.
+		if !reviewReport.Passed {
+			_ = appendProgress(artifactDir, name, storyID, "failed", "[review] "+summary)
+			_ = m.appendLearnings(artifactDir, name, storyID, "review", summary)
+			return fmt.Errorf("review found issues")
+		}
+	}
+
+	// ── PHASE 4: Sequential Quality Checks ────────────────────────────────────
 	if m.qualityChecker == nil {
 		return fmt.Errorf("quality checker is not configured")
 	}
@@ -152,9 +211,11 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 	}
 	if !report.Passed {
 		_ = appendProgress(artifactDir, name, storyID, "failed", formatQualitySummary(report))
+		_ = m.appendLearnings(artifactDir, name, storyID, "quality", formatQualitySummary(report))
 		return fmt.Errorf("quality checks failed")
 	}
 
+	// ── PHASE 5: Commit ────────────────────────────────────────────────────────
 	if m.committer == nil {
 		return fmt.Errorf("git committer is not configured")
 	}
@@ -463,43 +524,9 @@ func indentedBlock(text string) string {
 	return strings.Join(lines, "\n")
 }
 
-func buildStoryPrompt(doc prd.Document, story prd.UserStory) string {
-	builder := strings.Builder{}
-	builder.WriteString("Project: ")
-	builder.WriteString(strings.TrimSpace(doc.Project))
-	builder.WriteString("\n")
-	builder.WriteString("Project Description: ")
-	builder.WriteString(strings.TrimSpace(doc.Description))
-	builder.WriteString("\n\n")
-	builder.WriteString("Active Story\n")
-	builder.WriteString("ID: ")
-	builder.WriteString(story.ID)
-	builder.WriteString("\n")
-	builder.WriteString("Title: ")
-	builder.WriteString(story.Title)
-	builder.WriteString("\n")
-	builder.WriteString("Description: ")
-	builder.WriteString(story.Description)
-	builder.WriteString("\n")
-	builder.WriteString("Priority: ")
-	builder.WriteString(strconv.Itoa(story.Priority))
-	builder.WriteString("\n")
-	builder.WriteString("Acceptance Criteria:\n")
-	for _, criterion := range story.AcceptanceCriteria {
-		builder.WriteString("- ")
-		builder.WriteString(criterion)
-		builder.WriteString("\n")
-	}
-	builder.WriteString("\nRules:\n")
-	builder.WriteString("- Implement only this active story.\n")
-	builder.WriteString("- Satisfy all acceptance criteria.\n")
-	builder.WriteString("- Do not execute destructive git operations.\n")
-	builder.WriteString("- Summarize code changes and check results.\n")
-
-	return strings.TrimSpace(builder.String())
-}
-
-func buildContextFiles(artifactDir, workDir, prdName string) []string {
+// buildContextFiles assembles the ordered list of context files for an iteration.
+// This is a method on Manager so it can be reused in the plan phase.
+func (m Manager) buildContextFiles(artifactDir, workDir, prdName string) []string {
 	candidates := []string{
 		project.PRDMarkdownPath(artifactDir, prdName),
 		project.PRDJSONPath(artifactDir, prdName),
@@ -538,6 +565,162 @@ func buildContextFiles(artifactDir, workDir, prdName string) []string {
 	}
 
 	return contextFiles
+}
+
+// injectLearnings appends the learnings file to the context files if it exists.
+func (m Manager) injectLearnings(contextFiles []string, artifactDir, prdName string) []string {
+	path := project.PRDLearningsPath(artifactDir, prdName)
+	if _, err := os.Stat(path); err != nil {
+		return contextFiles
+	}
+	result := make([]string, 0, len(contextFiles)+1)
+	result = append(result, contextFiles...)
+	result = append(result, path)
+	return result
+}
+
+// runPlanPhase generates an implementation plan for the given story and writes it
+// to .daedalus/prds/<name>/plans/<storyID>.md. Returns the plan path on success.
+func (m Manager) runPlanPhase(
+	ctx context.Context,
+	artifactDir, workDir, prdName string,
+	doc prd.Document,
+	story prd.UserStory,
+	contextFiles []string,
+) (string, error) {
+	// Ensure plans directory exists.
+	plansDir := project.PRDPlansDir(artifactDir, prdName)
+	if err := os.MkdirAll(plansDir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create plans directory: %w", err)
+	}
+
+	planPath := project.PRDPlanPath(artifactDir, prdName, story.ID)
+	prompt := buildPlanPrompt(doc, story)
+
+	request := providers.IterationRequest{
+		WorkDir:        workDir,
+		Prompt:         prompt,
+		ContextFiles:   contextFiles,
+		ApprovalPolicy: m.iteration.ApprovalPolicy,
+		SandboxPolicy:  m.iteration.SandboxPolicy,
+		Model:          m.iteration.Model,
+		Metadata: map[string]string{
+			"storyID": story.ID,
+			"phase":   "plan",
+		},
+	}
+
+	events, result, err := m.provider.RunIteration(ctx, request)
+	if err != nil {
+		return "", fmt.Errorf("plan phase provider error: %w", err)
+	}
+
+	var planText strings.Builder
+	for event := range events {
+		if event.Type == providers.EventAssistantText {
+			planText.WriteString(event.Message)
+		}
+	}
+
+	planContent := strings.TrimSpace(planText.String())
+	if planContent == "" {
+		planContent = strings.TrimSpace(result.Summary)
+	}
+
+	if err := os.WriteFile(planPath, []byte(planContent), 0o644); err != nil {
+		return "", fmt.Errorf("failed to write plan file: %w", err)
+	}
+
+	_ = appendAgentLog(artifactDir, prdName, "[plan] wrote "+planPath+"\n")
+	return planPath, nil
+}
+
+// buildPlanPrompt generates the prompt for the plan phase.
+func buildPlanPrompt(doc prd.Document, story prd.UserStory) string {
+	builder := strings.Builder{}
+	builder.WriteString("You are a senior engineer creating an implementation plan.\n\n")
+	builder.WriteString("Project: ")
+	builder.WriteString(strings.TrimSpace(doc.Project))
+	builder.WriteString("\n\nProject Description: ")
+	builder.WriteString(strings.TrimSpace(doc.Description))
+	builder.WriteString("\n\nActive Story\n")
+	builder.WriteString("ID: ")
+	builder.WriteString(story.ID)
+	builder.WriteString("\nTitle: ")
+	builder.WriteString(story.Title)
+	builder.WriteString("\nDescription: ")
+	builder.WriteString(story.Description)
+	builder.WriteString("\nPriority: ")
+	builder.WriteString(strconv.Itoa(story.Priority))
+	builder.WriteString("\nAcceptance Criteria:\n")
+	for _, criterion := range story.AcceptanceCriteria {
+		builder.WriteString("- ")
+		builder.WriteString(criterion)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\nYour task: Write a detailed implementation plan for this story.\n")
+	builder.WriteString("Cover: objective, proposed architecture, implementation approach, key files to modify, potential pitfalls, and success criteria.\n")
+	builder.WriteString("Output a clean markdown plan. Do not implement the code.\n")
+	return builder.String()
+}
+
+// appendLearnings records a learning entry in the learnings file after a failure.
+// The learnings file accumulates across the project's lifetime.
+func (m Manager) appendLearnings(artifactDir, prdName, storyID, phase, summary string) error {
+	if !m.compoundEnabled {
+		return nil
+	}
+	path := project.PRDLearningsPath(artifactDir, prdName)
+	entry := fmt.Sprintf(
+		"\n## %s — %s [%s]\n%s\n",
+		storyID,
+		phase,
+		time.Now().UTC().Format(time.RFC3339),
+		summary,
+	)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.WriteString(entry)
+	return err
+}
+
+func buildStoryPrompt(doc prd.Document, story prd.UserStory) string {
+	builder := strings.Builder{}
+	builder.WriteString("Project: ")
+	builder.WriteString(strings.TrimSpace(doc.Project))
+	builder.WriteString("\n")
+	builder.WriteString("Project Description: ")
+	builder.WriteString(strings.TrimSpace(doc.Description))
+	builder.WriteString("\n\n")
+	builder.WriteString("Active Story\n")
+	builder.WriteString("ID: ")
+	builder.WriteString(story.ID)
+	builder.WriteString("\n")
+	builder.WriteString("Title: ")
+	builder.WriteString(story.Title)
+	builder.WriteString("\n")
+	builder.WriteString("Description: ")
+	builder.WriteString(story.Description)
+	builder.WriteString("\n")
+	builder.WriteString("Priority: ")
+	builder.WriteString(strconv.Itoa(story.Priority))
+	builder.WriteString("\n")
+	builder.WriteString("Acceptance Criteria:\n")
+	for _, criterion := range story.AcceptanceCriteria {
+		builder.WriteString("- ")
+		builder.WriteString(criterion)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\nRules:\n")
+	builder.WriteString("- Implement only this active story.\n")
+	builder.WriteString("- Satisfy all acceptance criteria.\n")
+	builder.WriteString("- Do not execute destructive git operations.\n")
+	builder.WriteString("- Summarize code changes and check results.\n")
+
+	return strings.TrimSpace(builder.String())
 }
 
 func normalizeContextPath(baseDir, candidate string) (string, bool) {

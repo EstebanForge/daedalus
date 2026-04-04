@@ -68,6 +68,43 @@ push_on_complete = false
 auto_pr_on_complete = false
 ```
 
+## Compound Engineering (implemented)
+```toml
+[plan]
+enabled = true
+
+[review]
+enabled = true
+perspectives = ["security", "performance", "complexity"]
+
+[compound]
+enabled = true
+```
+
+### `[plan]`
+- `enabled: bool`
+  - Runs an explicit implementation plan phase before the work phase for each story.
+  - Generates a markdown plan in `.daedalus/prds/<name>/plans/<storyID>.md`.
+  - Plan is injected into the work phase context.
+  - Default: `true`.
+
+### `[review]`
+- `enabled: bool`
+  - Runs multi-perspective parallel review after the work phase.
+  - Each perspective is an independent agent iteration running concurrently.
+  - Findings are logged to the agent log and treated as quality failures if issues are found.
+  - Default: `true`.
+- `perspectives: []string`
+  - List of review perspectives to run in parallel.
+  - Supported values: `security`, `performance`, `complexity`.
+  - Default: `["security", "performance", "complexity"]`.
+
+### `[compound]`
+- `enabled: bool`
+  - Enables the learnings/compound loop. After any failure (work, review, or quality), a learning entry is appended to `.daedalus/prds/<name>/learnings.md`.
+  - Before each iteration, learnings are injected into the context so future agents learn from past failures.
+  - Default: `true`.
+
 ## Fields (implemented)
 
 ### `[provider]`

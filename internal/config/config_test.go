@@ -177,3 +177,43 @@ func TestLoadReadsProviderACPCommand(t *testing.T) {
 		t.Fatalf("expected acp command to be loaded, got %q", cfg.Providers.Codex.ACPCommand)
 	}
 }
+
+func TestPlanConfigDefaultsToEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	if !cfg.Plan.Enabled {
+		t.Fatal("expected plan.enabled to default to true")
+	}
+}
+
+func TestReviewConfigDefaultsToEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	if !cfg.Review.Enabled {
+		t.Fatal("expected review.enabled to default to true")
+	}
+	if len(cfg.Review.Perspectives) != 3 {
+		t.Fatalf("expected 3 review perspectives by default, got %d", len(cfg.Review.Perspectives))
+	}
+}
+
+func TestCompoundConfigDefaultsToEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	if !cfg.Compound.Enabled {
+		t.Fatal("expected compound.enabled to default to true")
+	}
+}
+
+func TestValidateAcceptsCompoundEngineeringConfig(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	cfg.Plan.Enabled = true
+	cfg.Review.Enabled = true
+	cfg.Review.Perspectives = []string{"security", "performance", "complexity"}
+	cfg.Compound.Enabled = true
+	err := Validate(cfg)
+	if err != nil {
+		t.Fatalf("expected valid config, got error: %v", err)
+	}
+}

@@ -50,3 +50,11 @@ type Provider interface {
 	Capabilities() Capabilities
 	RunIteration(ctx context.Context, request IterationRequest) (<-chan Event, IterationResult, error)
 }
+
+// PerspectiveReview is the result of a single review perspective (e.g., security, performance).
+type PerspectiveReview struct {
+	Perspective string
+	Findings    []string
+	Duration    string
+	Error       string
+}

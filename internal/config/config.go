@@ -19,6 +19,23 @@ type Config struct {
 	UI         UIConfig         `toml:"ui"`
 	Providers  ProvidersConfig  `toml:"providers"`
 	Completion CompletionConfig `toml:"completion"`
+	Plan       PlanConfig       `toml:"plan"`
+	Review     ReviewConfig     `toml:"review"`
+	Compound   CompoundConfig   `toml:"compound"`
+}
+
+type PlanConfig struct {
+	Enabled bool `toml:"enabled"`
+}
+
+type ReviewConfig struct {
+	Enabled      bool     `toml:"enabled"`
+	Perspectives []string `toml:"perspectives"`
+}
+
+type CompoundConfig struct {
+	Enabled       bool   `toml:"enabled"`
+	LearningsPath string `toml:"learnings_path"`
 }
 
 type CompletionConfig struct {
@@ -100,6 +117,20 @@ func Defaults() Config {
 		Completion: CompletionConfig{
 			PushOnComplete:   false,
 			AutoPROnComplete: false,
+		},
+		Plan: PlanConfig{
+			Enabled: true,
+		},
+		Review: ReviewConfig{
+			Enabled: true,
+			Perspectives: []string{
+				"security",
+				"performance",
+				"complexity",
+			},
+		},
+		Compound: CompoundConfig{
+			Enabled: true,
 		},
 	}
 }
@@ -232,5 +263,23 @@ func applyFallbacks(cfg *Config) {
 	}
 	if cfg.Providers.Codex.SandboxPolicy == "" {
 		cfg.Providers.Codex.SandboxPolicy = defaults.Providers.Codex.SandboxPolicy
+	}
+
+	// Plan: enabled defaults to true; if not set (zero value), apply default.
+	// A bool in Go defaults to false, so we only override when the whole struct is zero.
+	if cfg.Plan == (PlanConfig{}) {
+		cfg.Plan.Enabled = defaults.Plan.Enabled
+	}
+
+	// Review: enabled defaults to true; perspectives must not be empty.
+	// Can't compare structs with slices, so check perspectives length directly.
+	if len(cfg.Review.Perspectives) == 0 {
+		cfg.Review.Enabled = defaults.Review.Enabled
+		cfg.Review.Perspectives = defaults.Review.Perspectives
+	}
+
+	// Compound: enabled defaults to true.
+	if cfg.Compound == (CompoundConfig{}) {
+		cfg.Compound.Enabled = defaults.Compound.Enabled
 	}
 }

@@ -70,3 +70,15 @@ func PRDJTBDPath(workDir, name string) string {
 func PRDArchitecturePath(workDir, name string) string {
 	return filepath.Join(PRDPath(workDir, name), "architecture-design.md")
 }
+
+func PRDPlansDir(workDir, name string) string {
+	return filepath.Join(PRDPath(workDir, name), "plans")
+}
+
+func PRDPlanPath(workDir, name, storyID string) string {
+	return filepath.Join(PRDPlansDir(workDir, name), storyID+".md")
+}
+
+func PRDLearningsPath(workDir, name string) string {
+	return filepath.Join(PRDPath(workDir, name), "learnings.md")
+}
