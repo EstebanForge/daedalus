@@ -691,6 +691,9 @@ func tuiHelpLines(state tuiSnapshot) []string {
 		"- d: toggle diff view",
 		"- l: open PRD picker",
 		"- ,: toggle settings",
+		"- 1: toggle plan phase",
+		"- 2: toggle parallel review",
+		"- 3: toggle compound learnings",
 		"- ?: toggle help",
 		"",
 		"PRD Navigation",
@@ -802,6 +805,13 @@ func tuiWorktreeInfo(baseDir, name string) (string, string) {
 	return "", ""
 }
 
+func boolYesNo(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
 func tuiSettingsLines(cfg config.Config, state tuiSnapshot) []string {
 	provider := strings.TrimSpace(state.provider)
 	if provider == "" {
@@ -829,6 +839,12 @@ func tuiSettingsLines(cfg config.Config, state tuiSnapshot) []string {
 		fmt.Sprintf("Retry max: %d", cfg.Retry.MaxRetries),
 		fmt.Sprintf("Retry delays: %s", strings.Join(cfg.Retry.Delays, ", ")),
 		fmt.Sprintf("Quality commands: %s", strings.Join(cfg.Quality.Commands, " ; ")),
+		"",
+		"Compound Engineering:",
+		fmt.Sprintf("  [1] Plan phase:        %s (key: 1 to toggle)", boolYesNo(state.planEnabled)),
+		fmt.Sprintf("  [2] Parallel review:   %s (key: 2 to toggle)", boolYesNo(state.reviewEnabled)),
+		fmt.Sprintf("  [3] Compound learnings: %s (key: 3 to toggle)", boolYesNo(state.compoundEnabled)),
+		fmt.Sprintf("  Review perspectives:  %s", strings.Join(cfg.Review.Perspectives, ", ")),
 		"",
 		"Agent adapters:",
 	}

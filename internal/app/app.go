@@ -33,73 +33,83 @@ type App struct {
 }
 
 type tuiState struct {
-	mu             sync.Mutex
-	selectedPRD    string
-	view           string
-	previousView   string
-	loopState      string
-	themeMode      string
-	lastError      string
-	lastActivity   string
-	iterations     int
-	startedAt      time.Time
-	lastRunAt      string
-	provider       string
-	pauseRequested bool
-	stopRequested  bool
-	storyIndex     int
-	pickerIndex    int
-	logFilter      string
-	logTail        int
-	logOffset      int
-	diffOffset     int
+	mu              sync.Mutex
+	selectedPRD     string
+	view            string
+	previousView    string
+	loopState       string
+	themeMode       string
+	lastError       string
+	lastActivity    string
+	iterations      int
+	startedAt       time.Time
+	lastRunAt       string
+	provider        string
+	pauseRequested  bool
+	stopRequested   bool
+	storyIndex      int
+	pickerIndex     int
+	logFilter       string
+	logTail         int
+	logOffset       int
+	diffOffset      int
+	// Compound engineering feature flags (runtime overrides, TUI-only).
+	planEnabled     bool
+	reviewEnabled   bool
+	compoundEnabled bool
 }
 
 type tuiSnapshot struct {
-	selectedPRD    string
-	view           string
-	previousView   string
-	loopState      string
-	themeMode      string
-	lastError      string
-	lastActivity   string
-	iterations     int
-	startedAt      time.Time
-	lastRunAt      string
-	provider       string
-	pauseRequested bool
-	stopRequested  bool
-	storyIndex     int
-	pickerIndex    int
-	logFilter      string
-	logTail        int
-	logOffset      int
-	diffOffset     int
+	selectedPRD     string
+	view            string
+	previousView    string
+	loopState       string
+	themeMode       string
+	lastError       string
+	lastActivity    string
+	iterations      int
+	startedAt       time.Time
+	lastRunAt       string
+	provider        string
+	pauseRequested  bool
+	stopRequested   bool
+	storyIndex      int
+	pickerIndex     int
+	logFilter       string
+	logTail         int
+	logOffset       int
+	diffOffset      int
+	planEnabled     bool
+	reviewEnabled   bool
+	compoundEnabled bool
 }
 
 func (s *tuiState) snapshot() tuiSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return tuiSnapshot{
-		selectedPRD:    s.selectedPRD,
-		view:           s.view,
-		previousView:   s.previousView,
-		loopState:      s.loopState,
-		themeMode:      s.themeMode,
-		lastError:      s.lastError,
-		lastActivity:   s.lastActivity,
-		iterations:     s.iterations,
-		startedAt:      s.startedAt,
-		lastRunAt:      s.lastRunAt,
-		provider:       s.provider,
-		pauseRequested: s.pauseRequested,
-		stopRequested:  s.stopRequested,
-		storyIndex:     s.storyIndex,
-		pickerIndex:    s.pickerIndex,
-		logFilter:      s.logFilter,
-		logTail:        s.logTail,
-		logOffset:      s.logOffset,
-		diffOffset:     s.diffOffset,
+		selectedPRD:     s.selectedPRD,
+		view:            s.view,
+		previousView:    s.previousView,
+		loopState:       s.loopState,
+		themeMode:       s.themeMode,
+		lastError:       s.lastError,
+		lastActivity:    s.lastActivity,
+		iterations:      s.iterations,
+		startedAt:       s.startedAt,
+		lastRunAt:       s.lastRunAt,
+		provider:        s.provider,
+		pauseRequested:  s.pauseRequested,
+		stopRequested:   s.stopRequested,
+		storyIndex:      s.storyIndex,
+		pickerIndex:     s.pickerIndex,
+		logFilter:       s.logFilter,
+		logTail:         s.logTail,
+		logOffset:       s.logOffset,
+		diffOffset:      s.diffOffset,
+		planEnabled:     s.planEnabled,
+		reviewEnabled:   s.reviewEnabled,
+		compoundEnabled: s.compoundEnabled,
 	}
 }
 
@@ -228,6 +238,27 @@ func (s *tuiState) setLogTail(tail int) {
 		tail = 1
 	}
 	s.logTail = tail
+}
+
+func (s *tuiState) togglePlan() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.planEnabled = !s.planEnabled
+	return s.planEnabled
+}
+
+func (s *tuiState) toggleReview() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviewEnabled = !s.reviewEnabled
+	return s.reviewEnabled
+}
+
+func (s *tuiState) toggleCompound() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.compoundEnabled = !s.compoundEnabled
+	return s.compoundEnabled
 }
 
 func (s *tuiState) moveStoryIndex(delta int, total int) {
@@ -426,7 +457,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 	case "sessions", "session":
 		return a.runSessions(baseDir, remainingArgs[1:])
 	case "run":
-		return a.runLoop(ctx, store, cfg, global, baseDir, remainingArgs[1:])
+		return a.runLoop(ctx, store, cfg, global, baseDir, remainingArgs[1:], nil)
 	case "plugin":
 		return a.runPlugin(ctx, store, cfg, global, baseDir, remainingArgs[1:])
 	case "edit":
@@ -677,7 +708,16 @@ func (a App) runSessionsStatus(baseDir, providerFilter string) error {
 	return nil
 }
 
-func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string, args []string) error {
+// LoopOverrides contains optional per-run feature overrides. Nil means use config defaults.
+type LoopOverrides struct {
+	PlanEnabled     *bool
+	ReviewEnabled   *bool
+	CompoundEnabled *bool
+	// PhaseReporter is called when the loop enters a new phase (planning, reviewing, etc.).
+	PhaseReporter func(phase, description string)
+}
+
+func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, global globalOptions, baseDir string, args []string, overrides *LoopOverrides) error {
 	ob := onboarding.NewManager(baseDir)
 	required, obErr := ob.IsRequired()
 	if obErr != nil {
@@ -724,9 +764,25 @@ func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, gl
 		return err
 	}
 
+	// Resolve effective feature flags: overrides take precedence over config.
+	planEnabled := cfg.Plan.Enabled
+	reviewEnabled := cfg.Review.Enabled
+	compoundEnabled := cfg.Compound.Enabled
+	if overrides != nil {
+		if overrides.PlanEnabled != nil {
+			planEnabled = *overrides.PlanEnabled
+		}
+		if overrides.ReviewEnabled != nil {
+			reviewEnabled = *overrides.ReviewEnabled
+		}
+		if overrides.CompoundEnabled != nil {
+			compoundEnabled = *overrides.CompoundEnabled
+		}
+	}
+
 	// Build reviewer if review is enabled.
 	var reviewer quality.Reviewer
-	if cfg.Review.Enabled && len(cfg.Review.Perspectives) > 0 {
+	if reviewEnabled && len(cfg.Review.Perspectives) > 0 {
 		reviewer = quality.NewParallelReviewer(provider)
 	}
 
@@ -738,11 +794,14 @@ func (a App) runLoop(ctx context.Context, store prd.Store, cfg config.Config, gl
 			PushOnComplete:   completionCfg.PushOnComplete,
 			AutoPROnComplete: completionCfg.AutoPROnComplete,
 		}, daedalusgit.NewCommitter(),
-		cfg.Plan.Enabled,
+		planEnabled,
 		reviewer,
 		cfg.Review.Perspectives,
-		cfg.Compound.Enabled,
+		compoundEnabled,
 	)
+	if overrides != nil && overrides.PhaseReporter != nil {
+		manager.SetPhaseReporter(overrides.PhaseReporter)
+	}
 	if err := manager.RunOnce(ctx, name, baseDir, execDir); err != nil {
 		return err
 	}
@@ -789,7 +848,7 @@ func (a App) runPlugin(ctx context.Context, store prd.Store, cfg config.Config, 
 	case "run":
 		originalOut := a.out
 		a.out = io.Discard
-		runErr := a.runLoop(ctx, store, cfg, global, baseDir, args[1:])
+		runErr := a.runLoop(ctx, store, cfg, global, baseDir, args[1:], nil)
 		a.out = originalOut
 		if runErr != nil {
 			a.writeJSON(map[string]interface{}{
@@ -879,14 +938,17 @@ func (a App) runTUI(ctx context.Context, store prd.Store, cfg config.Config, glo
 	}
 
 	state := &tuiState{
-		selectedPRD:  "",
-		view:         "dashboard",
-		previousView: "dashboard",
-		loopState:    "ready",
-		lastActivity: "Ready. Press s to start the loop.",
-		startedAt:    time.Now().UTC(),
-		logFilter:    "all",
-		logTail:      16,
+		selectedPRD:     "",
+		view:            "dashboard",
+		previousView:    "dashboard",
+		loopState:       "ready",
+		lastActivity:    "Ready. Press s to start the loop.",
+		startedAt:       time.Now().UTC(),
+		logFilter:       "all",
+		logTail:         16,
+		planEnabled:     cfg.Plan.Enabled,
+		reviewEnabled:   cfg.Review.Enabled,
+		compoundEnabled: cfg.Compound.Enabled,
 	}
 	controller := &loopController{}
 	if name, err := store.AutoDetectName(); err == nil {
@@ -1171,7 +1233,18 @@ func (a App) runTUILoopWorker(
 		}
 		state.setActivity(fmt.Sprintf("Running iteration %d with provider %s.", snap.iterations+1, snap.provider))
 
-		if err := a.runLoop(ctx, store, cfg, global, baseDir, runArgs); err != nil {
+		// Build per-run overrides from TUI runtime flags.
+		snap = state.snapshot()
+		overrides := &LoopOverrides{
+			PhaseReporter: func(phase, description string) {
+				state.setActivity(fmt.Sprintf("[%s] %s", phase, description))
+			},
+			PlanEnabled:     &snap.planEnabled,
+			ReviewEnabled:   &snap.reviewEnabled,
+			CompoundEnabled: &snap.compoundEnabled,
+		}
+
+		if err := a.runLoop(ctx, store, cfg, global, baseDir, runArgs, overrides); err != nil {
 			if _, stopNow := controller.checkRequests(); stopNow && errors.Is(err, context.Canceled) {
 				state.setStopRequested(false)
 				state.setLoopState("stopped")

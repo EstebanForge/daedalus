@@ -46,6 +46,10 @@ type completionExecutor interface {
 	CreatePR(ctx context.Context, workDir string) error
 }
 
+// PhaseReporter is called when the loop enters a new execution phase.
+// It receives the phase name (e.g., "planning", "reviewing") and a description.
+type PhaseReporter func(phase, description string)
+
 type Manager struct {
 	store              prd.Store
 	provider           providers.Provider
@@ -60,6 +64,20 @@ type Manager struct {
 	reviewer           quality.Reviewer
 	reviewPerspectives []string
 	compoundEnabled    bool
+	phaseReporter      PhaseReporter
+}
+
+// SetPhaseReporter sets a callback for phase transitions during RunOnce.
+// This is called by the TUI to update the activity indicator in real time.
+func (m *Manager) SetPhaseReporter(reporter PhaseReporter) {
+	m.phaseReporter = reporter
+}
+
+// reportPhase calls the phase reporter if one is set.
+func (m *Manager) reportPhase(phase, description string) {
+	if m.phaseReporter != nil {
+		m.phaseReporter(phase, description)
+	}
 }
 
 func NewManager(
@@ -139,6 +157,7 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 	// ── PHASE 1: Plan (optional) ──────────────────────────────────────────────
 	var planPath string
 	if m.planEnabled {
+		m.reportPhase("planning", storyID)
 		planPath, err = m.runPlanPhase(ctx, artifactDir, workDir, name, doc, *story, contextFiles)
 		if err != nil {
 			_ = appendProgress(artifactDir, name, storyID, "error", "plan phase failed: "+err.Error())
@@ -157,6 +176,7 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 	}
 
 	// ── PHASE 2: Work ─────────────────────────────────────────────────────────
+	m.reportPhase("working", storyID)
 	prompt := buildStoryPrompt(doc, *story)
 	request := providers.IterationRequest{
 		WorkDir:        workDir,
@@ -179,6 +199,7 @@ func (m Manager) RunOnce(ctx context.Context, name string, artifactDir string, w
 
 	// ── PHASE 3: Parallel Review (optional) ───────────────────────────────────
 	if m.reviewer != nil && len(m.reviewPerspectives) > 0 {
+		m.reportPhase("reviewing", storyID)
 		reviewReport, reviewErr := m.reviewer.RunReview(ctx, workDir, contextFiles, m.reviewPerspectives, request)
 		if reviewErr != nil {
 			_ = appendAgentLog(artifactDir, name, "[review] error: "+reviewErr.Error()+"\n")

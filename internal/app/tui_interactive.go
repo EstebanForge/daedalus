@@ -287,6 +287,33 @@ func (m interactiveTUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state.setLogTail(snap.logTail - 1)
 		m.state.setActivity("Log tail set to " + strconv.Itoa(m.state.snapshot().logTail) + ".")
 		return m, nil
+	case "1":
+		// Toggle plan phase.
+		enabled := m.state.togglePlan()
+		status := "plan"
+		if !enabled {
+			status = "plan (off)"
+		}
+		m.state.setActivity("Plan phase " + status + ". Press s to start loop.")
+		return m, nil
+	case "2":
+		// Toggle parallel review.
+		enabled := m.state.toggleReview()
+		status := "review"
+		if !enabled {
+			status = "review (off)"
+		}
+		m.state.setActivity("Parallel review " + status + ". Press s to start loop.")
+		return m, nil
+	case "3":
+		// Toggle compound learnings.
+		enabled := m.state.toggleCompound()
+		status := "compound"
+		if !enabled {
+			status = "compound (off)"
+		}
+		m.state.setActivity("Compound learnings " + status + ". Press s to start loop.")
+		return m, nil
 	case "up", "k":
 		return m.handleUp()
 	case "down", "j":
